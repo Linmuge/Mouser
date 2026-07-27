@@ -71,6 +71,8 @@ class MouseHook(BaseMouseHook):
         self._wake_observer = None
         self._session_resign_observer = None
         self._session_activate_observer = None
+        self._session_rearm_timers = set()
+        self._session_rearm_lock = threading.Lock()
         self._init_dispatch_queue(maxsize=512)
         self._dispatch_thread = None
         self._first_event_logged = False
@@ -473,14 +475,39 @@ class MouseHook(BaseMouseHook):
             if hg:
                 hg.force_reconnect()
 
+        def _retry_after_session_transition(reason, delay):
+            """Retry after macOS finishes rebuilding the login session.
+
+            On lock/unlock, NSWorkspace's active notification can arrive
+            before the HID receiver and CGEventTap are usable again. A single
+            immediate re-enable races that transition and leaves the hook
+            alive but ineffective. Keep the retry bounded and cancel it in
+            ``stop`` so this cannot create a permanent background worker.
+            """
+            def _retry():
+                with self._session_rearm_lock:
+                    self._session_rearm_timers.discard(timer)
+                if self._running:
+                    _re_enable_tap_and_reconnect(reason)
+
+            timer = threading.Timer(delay, _retry)
+            timer.daemon = True
+            with self._session_rearm_lock:
+                self._session_rearm_timers.add(timer)
+            timer.start()
+
         def _on_wake(notification):
             _re_enable_tap_and_reconnect("wake")
+            _retry_after_session_transition("wake-retry-1", 1.0)
+            _retry_after_session_transition("wake-retry-2", 3.0)
 
         def _on_session_resign(notification):
             print("[MouseHook] Session deactivated", flush=True)
 
         def _on_session_activate(notification):
             _re_enable_tap_and_reconnect("user-switch")
+            _retry_after_session_transition("session-retry-1", 1.0)
+            _retry_after_session_transition("session-retry-2", 3.0)
 
         self._wake_observer = notification_center.addObserverForName_object_queue_usingBlock_(
             "NSWorkspaceDidWakeNotification",
@@ -579,6 +606,11 @@ class MouseHook(BaseMouseHook):
 
     def stop(self):
         self._unregister_wake_observer()
+        with self._session_rearm_lock:
+            timers = tuple(self._session_rearm_timers)
+            self._session_rearm_timers.clear()
+        for timer in timers:
+            timer.cancel()
         self._running = False
         self.abort_button_gesture("stop")
         self._stop_hid_listener()
