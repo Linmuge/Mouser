@@ -3,6 +3,7 @@ macOS mouse hook implementation.
 """
 
 import functools
+import ctypes
 import queue
 import sys
 import threading
@@ -56,6 +57,76 @@ _kCGEventTapDisabledByTimeout = 0xFFFFFFFE
 _kCGEventTapDisabledByUserInput = 0xFFFFFFFF
 
 
+@functools.lru_cache(maxsize=1)
+def _console_lock_iokit_bindings():
+    """Return the small IOKit/CoreFoundation surface used for lock polling."""
+    iokit = ctypes.CDLL(
+        "/System/Library/Frameworks/IOKit.framework/IOKit"
+    )
+    core_foundation = ctypes.CDLL(
+        "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+    )
+
+    iokit.IORegistryGetRootEntry.argtypes = [ctypes.c_uint]
+    iokit.IORegistryGetRootEntry.restype = ctypes.c_uint
+    iokit.IORegistryEntryCreateCFProperty.argtypes = [
+        ctypes.c_uint,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_uint,
+    ]
+    iokit.IORegistryEntryCreateCFProperty.restype = ctypes.c_void_p
+    iokit.IOObjectRelease.argtypes = [ctypes.c_uint]
+    iokit.IOObjectRelease.restype = ctypes.c_int
+
+    core_foundation.CFStringCreateWithCString.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_uint32,
+    ]
+    core_foundation.CFStringCreateWithCString.restype = ctypes.c_void_p
+    core_foundation.CFBooleanGetTypeID.argtypes = []
+    core_foundation.CFBooleanGetTypeID.restype = ctypes.c_ulong
+    core_foundation.CFGetTypeID.argtypes = [ctypes.c_void_p]
+    core_foundation.CFGetTypeID.restype = ctypes.c_ulong
+    core_foundation.CFBooleanGetValue.argtypes = [ctypes.c_void_p]
+    core_foundation.CFBooleanGetValue.restype = ctypes.c_bool
+    core_foundation.CFRelease.argtypes = [ctypes.c_void_p]
+
+    # kCFStringEncodingUTF8. The cached key is intentionally retained for the
+    # process lifetime together with the cached function bindings.
+    key = core_foundation.CFStringCreateWithCString(
+        None, b"IOConsoleLocked", 0x08000100
+    )
+    if not key:
+        raise RuntimeError("could not create IOConsoleLocked key")
+    return iokit, core_foundation, key
+
+
+def _read_console_locked():
+    """Read the kernel's current console lock state, or None if unavailable."""
+    root = 0
+    value = None
+    try:
+        iokit, core_foundation, key = _console_lock_iokit_bindings()
+        root = iokit.IORegistryGetRootEntry(0)
+        if not root:
+            return None
+        value = iokit.IORegistryEntryCreateCFProperty(root, key, None, 0)
+        if not value:
+            return None
+        if core_foundation.CFGetTypeID(value) != core_foundation.CFBooleanGetTypeID():
+            return None
+        return bool(core_foundation.CFBooleanGetValue(value))
+    except Exception:
+        return None
+    finally:
+        if value:
+            core_foundation.CFRelease(value)
+        if root:
+            iokit.IOObjectRelease(root)
+
+
 class MouseHook(BaseMouseHook):
     """
     Uses CGEventTap on macOS to intercept mouse button presses and scroll
@@ -74,6 +145,8 @@ class MouseHook(BaseMouseHook):
         self._screen_unlock_observer = None
         self._session_rearm_timers = set()
         self._session_rearm_lock = threading.Lock()
+        self._console_lock_stop = threading.Event()
+        self._console_lock_thread = None
         self._init_dispatch_queue(maxsize=512)
         self._dispatch_thread = None
         self._first_event_logged = False
@@ -464,6 +537,8 @@ class MouseHook(BaseMouseHook):
         notification_center = NSWorkspace.sharedWorkspace().notificationCenter()
         distributed_center = NSDistributedNotificationCenter.defaultCenter()
         hg = self._hid_gesture
+        unlock_recovery_lock = threading.Lock()
+        last_unlock_recovery_at = [float("-inf")]
 
         def _re_enable_tap_and_reconnect(reason):
             if self._tap and self._running:
@@ -517,9 +592,59 @@ class MouseHook(BaseMouseHook):
             # can still lose its native wheel-invert bit while the existing
             # HID connection remains logically alive, so force a bounded
             # reconnect after this separate screen-unlock signal.
+            #
+            # Some macOS versions emit the distributed notification while the
+            # IOConsoleLocked fallback observes the same transition. Coalesce
+            # that pair so one unlock creates only one reconnect sequence.
+            now = time.monotonic()
+            with unlock_recovery_lock:
+                if now - last_unlock_recovery_at[0] < 1.0:
+                    print(
+                        "[MouseHook] Duplicate screen-unlock recovery coalesced",
+                        flush=True,
+                    )
+                    return
+                last_unlock_recovery_at[0] = now
             _re_enable_tap_and_reconnect("screen-unlock")
             _retry_after_session_transition("screen-unlock-retry-1", 1.0)
             _retry_after_session_transition("screen-unlock-retry-2", 3.0)
+
+        # `com.apple.screenIsUnlocked` is not emitted on every macOS release
+        # and lock path. IOConsoleLocked is the authoritative kernel-side
+        # state on those systems, so watch its true -> false edge as a bounded
+        # fallback. The edge invokes the same full HID reconnect path, which
+        # re-discovers features, re-diverts the wheel-mode button, and lets the
+        # engine replay saved wheel settings.
+        self._console_lock_stop.clear()
+
+        def _monitor_console_lock():
+            previous = None
+            while not self._console_lock_stop.is_set():
+                locked = _read_console_locked()
+                if locked is not None:
+                    if previous is True and locked is False:
+                        print(
+                            "[MouseHook] Screen unlock detected "
+                            "(IOConsoleLocked)",
+                            flush=True,
+                        )
+                        try:
+                            _on_screen_unlock(None)
+                        except Exception as exc:
+                            print(
+                                f"[MouseHook] Screen unlock recovery failed: {exc}",
+                                flush=True,
+                            )
+                    previous = locked
+                if self._console_lock_stop.wait(0.5):
+                    return
+
+        self._console_lock_thread = threading.Thread(
+            target=_monitor_console_lock,
+            daemon=True,
+            name="ConsoleLockMonitor",
+        )
+        self._console_lock_thread.start()
 
         self._wake_observer = notification_center.addObserverForName_object_queue_usingBlock_(
             "NSWorkspaceDidWakeNotification",
@@ -574,6 +699,13 @@ class MouseHook(BaseMouseHook):
                 self._screen_unlock_observer = None
         except Exception:
             pass
+
+    def _stop_console_lock_monitor(self):
+        self._console_lock_stop.set()
+        thread = self._console_lock_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
+        self._console_lock_thread = None
 
     def start(self):
         if not _QUARTZ_OK:
@@ -631,6 +763,7 @@ class MouseHook(BaseMouseHook):
         return True
 
     def stop(self):
+        self._stop_console_lock_monitor()
         self._unregister_wake_observer()
         with self._session_rearm_lock:
             timers = tuple(self._session_rearm_timers)

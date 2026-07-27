@@ -965,6 +965,15 @@ class MacOSEventTapDisabledTests(unittest.TestCase):
             def cancel(self):
                 pass
 
+        class FakeThread:
+            def __init__(self, *, target, daemon, name):
+                self.target = target
+                self.daemon = daemon
+                self.name = name
+
+            def start(self):
+                pass
+
         fake_workspace = SimpleNamespace(
             notificationCenter=Mock(return_value=workspace_center)
         )
@@ -979,10 +988,88 @@ class MacOSEventTapDisabledTests(unittest.TestCase):
             patch("AppKit.NSWorkspace", fake_nsworkspace),
             patch("AppKit.NSDistributedNotificationCenter", fake_distributed),
             patch.object(mouse_hook.threading, "Timer", FakeTimer),
+            patch.object(mouse_hook.threading, "Thread", FakeThread),
         ):
             hook._register_wake_observer()
             self.assertIn("com.apple.screenIsUnlocked", registered)
             registered["com.apple.screenIsUnlocked"](None)
+
+        hook._hid_gesture.force_reconnect.assert_called_once_with()
+        self.assertEqual(timer_delays, [1.0, 3.0])
+
+    def test_duplicate_unlock_sources_share_one_recovery_sequence(self):
+        hook = self._make_hook()
+        hook._tap = None
+        hook._hid_gesture = SimpleNamespace(force_reconnect=Mock())
+        workspace_center = MagicMock(name="workspace_center")
+        distributed_center = MagicMock(name="distributed_center")
+        lock_states = iter((False, True, False))
+        distributed_callbacks = {}
+        timer_delays = []
+
+        workspace_center.addObserverForName_object_queue_usingBlock_.side_effect = (
+            lambda name, obj, queue, block: ("workspace", name)
+        )
+        def register_distributed(name, obj, queue, block):
+            distributed_callbacks[name] = block
+            return ("distributed", name)
+
+        distributed_center.addObserverForName_object_queue_usingBlock_.side_effect = (
+            register_distributed
+        )
+
+        class FakeStopEvent:
+            def __init__(self):
+                self.wait_calls = 0
+
+            def clear(self):
+                self.wait_calls = 0
+
+            def is_set(self):
+                return False
+
+            def wait(self, delay):
+                self.wait_calls += 1
+                return self.wait_calls >= 3
+
+        class ImmediateThread:
+            def __init__(self, *, target, daemon, name):
+                self.target = target
+                self.daemon = daemon
+                self.name = name
+
+            def start(self):
+                self.target()
+
+        class FakeTimer:
+            def __init__(self, delay, callback):
+                self.daemon = False
+                timer_delays.append(delay)
+
+            def start(self):
+                pass
+
+        fake_workspace = SimpleNamespace(
+            notificationCenter=Mock(return_value=workspace_center)
+        )
+        fake_nsworkspace = SimpleNamespace(
+            sharedWorkspace=Mock(return_value=fake_workspace)
+        )
+        fake_distributed = SimpleNamespace(
+            defaultCenter=Mock(return_value=distributed_center)
+        )
+        hook._console_lock_stop = FakeStopEvent()
+
+        with (
+            patch("AppKit.NSWorkspace", fake_nsworkspace),
+            patch("AppKit.NSDistributedNotificationCenter", fake_distributed),
+            patch.object(mouse_hook, "_read_console_locked", side_effect=lock_states,
+                         create=True),
+            patch.object(mouse_hook.threading, "Thread", ImmediateThread),
+            patch.object(mouse_hook.threading, "Timer", FakeTimer),
+        ):
+            hook._register_wake_observer()
+            distributed_callbacks["com.apple.screenIsUnlocked"](None)
 
         hook._hid_gesture.force_reconnect.assert_called_once_with()
         self.assertEqual(timer_delays, [1.0, 3.0])
