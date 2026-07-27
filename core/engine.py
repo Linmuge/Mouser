@@ -1316,6 +1316,7 @@ class Engine:
                 if hg is not None and hasattr(hg, "request_wheel_native_invert"):
                     threading.Thread(
                         target=self._apply_wheel_invert_setting,
+                        kwargs={"force": True},
                         daemon=True,
                         name="WheelInvertApply",
                     ).start()

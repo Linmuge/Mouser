@@ -1,7 +1,7 @@
 import copy
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from core.config import DEFAULT_CONFIG
 from core.mouse_hook import MouseEvent
@@ -680,6 +680,54 @@ class WheelInvertConnectThreadingTests(unittest.TestCase):
             # configured invert state.
             worker.run_target()
             request.assert_called_once_with(True, False)
+
+    def test_reconnect_forces_wheel_invert_replay_after_hardware_reset(self):
+        engine = self._make_engine()
+        engine.cfg["settings"]["invert_vscroll"] = True
+        device = SimpleNamespace(
+            name="MX Master 4",
+            has_hires_wheel=True,
+            has_thumbwheel=False,
+            gesture_via_sense_panel=False,
+            supported_buttons=None,
+        )
+        engine.hook.connected_device = device
+        engine.hook.device_connected = True
+        engine.hook._hid_gesture = SimpleNamespace(
+            connected_device=device,
+            request_wheel_native_invert=Mock(return_value=True),
+            set_wheel_divert_active_flags=Mock(),
+            read_battery=Mock(return_value=None),
+            _hires_wheel_idx=0,
+            _thumbwheel_idx=None,
+        )
+        request = engine.hook._hid_gesture.request_wheel_native_invert
+        threads = []
+
+        def factory(*args, **kwargs):
+            thread = _RecordedThread(*args, **kwargs)
+            threads.append(thread)
+            return thread
+
+        with patch("core.engine.threading.Thread", side_effect=factory):
+            engine._on_connection_change(True)
+            [
+                thread for thread in threads
+                if thread.name == "WheelInvertApply"
+            ][-1].run_target()
+
+            # Lock/unlock can reset the mouse's firmware bit.  The reconnect
+            # must write the saved value again even though Engine's cached
+            # target still says native inversion is active.
+            engine._on_connection_change(False)
+            engine._on_connection_change(True)
+            [
+                thread for thread in threads
+                if thread.name == "WheelInvertApply"
+            ][-1].run_target()
+
+        self.assertEqual(request.call_count, 2)
+        request.assert_has_calls([call(True, False), call(True, False)])
 
 
 if __name__ == "__main__":

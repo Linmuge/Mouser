@@ -71,6 +71,7 @@ class MouseHook(BaseMouseHook):
         self._wake_observer = None
         self._session_resign_observer = None
         self._session_activate_observer = None
+        self._screen_unlock_observer = None
         self._session_rearm_timers = set()
         self._session_rearm_lock = threading.Lock()
         self._init_dispatch_queue(maxsize=512)
@@ -457,10 +458,11 @@ class MouseHook(BaseMouseHook):
 
     def _register_wake_observer(self):
         try:
-            from AppKit import NSWorkspace
+            from AppKit import NSDistributedNotificationCenter, NSWorkspace
         except ImportError:
             return
         notification_center = NSWorkspace.sharedWorkspace().notificationCenter()
+        distributed_center = NSDistributedNotificationCenter.defaultCenter()
         hg = self._hid_gesture
 
         def _re_enable_tap_and_reconnect(reason):
@@ -509,6 +511,16 @@ class MouseHook(BaseMouseHook):
             _retry_after_session_transition("session-retry-1", 1.0)
             _retry_after_session_transition("session-retry-2", 3.0)
 
+        def _on_screen_unlock(notification):
+            # A normal lock-screen round trip does not emit the workspace
+            # wake or fast-user-switch notifications above. Logitech firmware
+            # can still lose its native wheel-invert bit while the existing
+            # HID connection remains logically alive, so force a bounded
+            # reconnect after this separate screen-unlock signal.
+            _re_enable_tap_and_reconnect("screen-unlock")
+            _retry_after_session_transition("screen-unlock-retry-1", 1.0)
+            _retry_after_session_transition("screen-unlock-retry-2", 3.0)
+
         self._wake_observer = notification_center.addObserverForName_object_queue_usingBlock_(
             "NSWorkspaceDidWakeNotification",
             None,
@@ -531,10 +543,18 @@ class MouseHook(BaseMouseHook):
                 _on_session_activate,
             )
         )
+        self._screen_unlock_observer = (
+            distributed_center.addObserverForName_object_queue_usingBlock_(
+                "com.apple.screenIsUnlocked",
+                None,
+                None,
+                _on_screen_unlock,
+            )
+        )
 
     def _unregister_wake_observer(self):
         try:
-            from AppKit import NSWorkspace
+            from AppKit import NSDistributedNotificationCenter, NSWorkspace
 
             notification_center = NSWorkspace.sharedWorkspace().notificationCenter()
             for attr in (
@@ -546,6 +566,12 @@ class MouseHook(BaseMouseHook):
                 if observer is not None:
                     notification_center.removeObserver_(observer)
                     setattr(self, attr, None)
+            observer = self._screen_unlock_observer
+            if observer is not None:
+                NSDistributedNotificationCenter.defaultCenter().removeObserver_(
+                    observer
+                )
+                self._screen_unlock_observer = None
         except Exception:
             pass
 

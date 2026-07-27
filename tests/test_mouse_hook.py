@@ -931,6 +931,62 @@ class MacOSEventTapDisabledTests(unittest.TestCase):
 
         self.mock_quartz.CGEventTapEnable.assert_not_called()
 
+    def test_screen_unlock_rearms_hid_with_bounded_retries(self):
+        hook = self._make_hook()
+        hook._tap = None
+        hook._hid_gesture = SimpleNamespace(force_reconnect=Mock())
+        workspace_center = MagicMock(name="workspace_center")
+        distributed_center = MagicMock(name="distributed_center")
+        registered = {}
+        timer_delays = []
+
+        workspace_center.addObserverForName_object_queue_usingBlock_.side_effect = (
+            lambda name, obj, queue, block: ("workspace", name)
+        )
+
+        def register_distributed(name, obj, queue, block):
+            registered[name] = block
+            return ("distributed", name)
+
+        distributed_center.addObserverForName_object_queue_usingBlock_.side_effect = (
+            register_distributed
+        )
+
+        class FakeTimer:
+            def __init__(self, delay, callback):
+                self.delay = delay
+                self.callback = callback
+                self.daemon = False
+                timer_delays.append(delay)
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                pass
+
+        fake_workspace = SimpleNamespace(
+            notificationCenter=Mock(return_value=workspace_center)
+        )
+        fake_nsworkspace = SimpleNamespace(
+            sharedWorkspace=Mock(return_value=fake_workspace)
+        )
+        fake_distributed = SimpleNamespace(
+            defaultCenter=Mock(return_value=distributed_center)
+        )
+
+        with (
+            patch("AppKit.NSWorkspace", fake_nsworkspace),
+            patch("AppKit.NSDistributedNotificationCenter", fake_distributed),
+            patch.object(mouse_hook.threading, "Timer", FakeTimer),
+        ):
+            hook._register_wake_observer()
+            self.assertIn("com.apple.screenIsUnlocked", registered)
+            registered["com.apple.screenIsUnlocked"](None)
+
+        hook._hid_gesture.force_reconnect.assert_called_once_with()
+        self.assertEqual(timer_delays, [1.0, 3.0])
+
 
 @unittest.skipUnless(sys.platform == "darwin", "macOS-only tests")
 class MacOSTrackpadScrollFilterTests(unittest.TestCase):
