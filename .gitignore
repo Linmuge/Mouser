@@ -37,6 +37,7 @@ Desktop.ini
 
 # Build artifacts
 build_icon.py
+design-demos/
 
 # Shortcuts (user-specific paths)
 *.lnk

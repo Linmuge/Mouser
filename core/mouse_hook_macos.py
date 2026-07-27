@@ -498,9 +498,11 @@ class MouseHook(BaseMouseHook):
                     mouse_event = None
                 if should_block:
                     return None
-                if (self.invert_vscroll or self.invert_hscroll) and not self.wheel_native_invert_active:
-                    if self._post_inverted_scroll_event(cg_event):
-                        return None
+                if not self.wheel_native_invert_active:
+                    if self.invert_vscroll:
+                        self._negate_scroll_axis(cg_event, 1)
+                    if self.invert_hscroll:
+                        self._negate_scroll_axis(cg_event, 2)
 
             if mouse_event:
                 self._enqueue_dispatch_event(mouse_event)
