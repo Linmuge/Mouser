@@ -418,16 +418,38 @@ struct MacActionExecutor: MouserActionExecuting, Sendable {
             partial.union(Self.flag(for: key))
         }
         for key in keys {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key.rawValue, keyDown: true) else { continue }
-            event.flags = flags
-            event.setIntegerValueField(.eventSourceUserData, value: Self.injectedEventMarker)
+            guard let event = Self.makeKeyboardEvent(
+                key: key,
+                keyDown: true,
+                modifierFlags: flags
+            ) else { continue }
             event.post(tap: .cghidEventTap)
         }
         for key in keys.reversed() {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: key.rawValue, keyDown: false) else { continue }
-            event.setIntegerValueField(.eventSourceUserData, value: Self.injectedEventMarker)
+            guard let event = Self.makeKeyboardEvent(
+                key: key,
+                keyDown: false,
+                modifierFlags: flags
+            ) else { continue }
             event.post(tap: .cghidEventTap)
         }
+    }
+
+    static func makeKeyboardEvent(
+        key: MacVirtualKey,
+        keyDown: Bool,
+        modifierFlags: CGEventFlags
+    ) -> CGEvent? {
+        guard let event = CGEvent(
+            keyboardEventSource: nil,
+            virtualKey: key.rawValue,
+            keyDown: keyDown
+        ) else { return nil }
+        if keyDown || Self.flag(for: key).isEmpty {
+            event.flags.formUnion(modifierFlags)
+        }
+        event.setIntegerValueField(.eventSourceUserData, value: Self.injectedEventMarker)
+        return event
     }
 
     private func postMouse(_ rawButton: UInt32) -> Bool {

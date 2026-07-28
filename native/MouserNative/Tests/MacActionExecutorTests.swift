@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import MouserNative
 
@@ -37,6 +38,29 @@ struct MacActionExecutorTests {
             MacActionPlanner.plan(for: "zoom_in") ==
                 .keyboard(keys: [.command, .equal], repetitions: 3)
         )
+    }
+
+    @Test("keyboard events preserve platform key flags while adding modifiers")
+    func keyboardEventsPreservePlatformFlags() throws {
+        let keyDown = try #require(
+            MacActionExecutor.makeKeyboardEvent(
+                key: .rightArrow,
+                keyDown: true,
+                modifierFlags: .maskControl
+            )
+        )
+        let keyUp = try #require(
+            MacActionExecutor.makeKeyboardEvent(
+                key: .rightArrow,
+                keyDown: false,
+                modifierFlags: .maskControl
+            )
+        )
+
+        #expect(keyDown.flags.contains(.maskNumericPad))
+        #expect(keyUp.flags.contains(.maskNumericPad))
+        #expect(keyDown.flags.contains(.maskControl))
+        #expect(keyUp.flags.contains(.maskControl))
     }
 
     @Test("custom shortcuts accept legacy names and reject unknown keys")

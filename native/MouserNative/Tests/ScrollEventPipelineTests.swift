@@ -341,6 +341,16 @@ struct CoreGraphicsScrollBridgeTests {
 
 @Suite("Console lock edge detection")
 struct ConsoleLockTransitionDetectorTests {
+    @Test("CG session lock state overrides a stale unlocked IOConsoleLocked value")
+    func prefersLockedConsoleSession() {
+        #expect(
+            IOConsoleLockStateReader.resolve(
+                ioConsoleLocked: false,
+                consoleUserLockStates: [true]
+            ) == true
+        )
+    }
+
     @Test("only a locked to unlocked edge requests recovery")
     func detectsUnlockEdge() {
         var detector = ConsoleLockTransitionDetector()
