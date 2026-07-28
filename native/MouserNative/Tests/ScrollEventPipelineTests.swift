@@ -244,11 +244,53 @@ struct SessionRecoveryPlannerTests {
         #expect(duplicate.isEmpty)
         #expect(later == [.zero, .seconds(1), .seconds(3)])
     }
+
+    @Test("device activity keeps HID recovery armed until settings are restored")
+    func deviceActivityRetriesUntilRestored() {
+        var planner = SessionRecoveryPlanner()
+
+        _ = planner.schedule(for: .screenUnlock, uptime: .seconds(10))
+        let lateMouseWake = planner.schedule(
+            for: .deviceActivity,
+            uptime: .seconds(30)
+        )
+        planner.markHIDSettingsRestored()
+        let afterRestore = planner.schedule(
+            for: .deviceActivity,
+            uptime: .seconds(31)
+        )
+
+        #expect(lateMouseWake == [.zero])
+        #expect(afterRestore.isEmpty)
+    }
 }
 
 @Suite("Core Graphics scroll bridge")
 @MainActor
 struct CoreGraphicsScrollBridgeTests {
+    @Test("physical scroll activity notifies the device wake recovery handler")
+    func reportsPhysicalDeviceActivity() throws {
+        let tap = CoreGraphicsScrollEventTap()
+        let capture = ScrollActionCapture()
+        tap.updateDeviceActivityHandler {
+            capture.actionIDs.append("device-activity")
+        }
+        let event = try #require(
+            CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .line,
+                wheelCount: 1,
+                wheel1: 1,
+                wheel2: 0,
+                wheel3: 0
+            )
+        )
+
+        tap.processScrollEvent(event)
+
+        #expect(capture.actionIDs == ["device-activity"])
+    }
+
     @Test("the event tap applies transformed values to the original Quartz event")
     func appliesTransformedValues() throws {
         let tap = CoreGraphicsScrollEventTap()

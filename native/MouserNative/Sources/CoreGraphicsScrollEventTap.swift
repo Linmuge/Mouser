@@ -19,6 +19,9 @@ protocol ScrollEventTapping: AnyObject {
         gestureMappings: [String: String],
         actionHandler: @escaping @Sendable (MappedActionInvocation) -> Void
     )
+    func updateDeviceActivityHandler(
+        _ handler: @escaping @Sendable () -> Void
+    )
     func beginExternalGesture(for button: MouseButton)
     func endExternalGesture(for button: MouseButton)
     @discardableResult func start() -> Bool
@@ -27,6 +30,12 @@ protocol ScrollEventTapping: AnyObject {
 }
 
 extension ScrollEventTapping {
+    func updateDeviceActivityHandler(
+        _ handler: @escaping @Sendable () -> Void
+    ) {
+        _ = handler
+    }
+
     func updateGestureSettings(_ settings: GestureRecognitionSettings) {
         _ = settings
     }
@@ -78,6 +87,7 @@ final class CoreGraphicsScrollEventTap: ScrollEventTapping {
     private var gestureMappings: [String: String] = [:]
     private var buttonMappings: [MouseButton: String] = [:]
     private var buttonActionHandler: (@Sendable (MappedActionInvocation) -> Void)?
+    private var deviceActivityHandler: (@Sendable () -> Void)?
 
     func updateSettings(_ settings: ScrollInversionSettings) {
         transformer.settings = settings
@@ -107,6 +117,12 @@ final class CoreGraphicsScrollEventTap: ScrollEventTapping {
         self.gestureMappings = gestureMappings
         activeGestureButton = nil
         buttonActionHandler = actionHandler
+    }
+
+    func updateDeviceActivityHandler(
+        _ handler: @escaping @Sendable () -> Void
+    ) {
+        deviceActivityHandler = handler
     }
 
     func beginExternalGesture(for button: MouseButton) {
@@ -206,6 +222,9 @@ final class CoreGraphicsScrollEventTap: ScrollEventTapping {
             momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase),
             sourceUserData: event.getIntegerValueField(.eventSourceUserData)
         )
+        if sample.sourceUserData != ScrollEventTransformer.eventMarker {
+            deviceActivityHandler?()
+        }
         var output = sample
         var shouldApply = false
         switch horizontalScrollRouter.route(
@@ -251,6 +270,14 @@ final class CoreGraphicsScrollEventTap: ScrollEventTapping {
         }
         if type == .scrollWheel {
             processScrollEvent(event)
+        }
+        if type == .mouseMoved || type == .otherMouseDragged ||
+            type == .otherMouseDown || type == .otherMouseUp
+        {
+            let source = event.getIntegerValueField(.eventSourceUserData)
+            if source != ScrollEventTransformer.eventMarker {
+                deviceActivityHandler?()
+            }
         }
         if (type == .mouseMoved || type == .otherMouseDragged),
            let activeGestureButton

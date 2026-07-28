@@ -168,6 +168,7 @@ enum SessionRecoverySignal: Equatable, Sendable {
     case screenWake
     case sessionActivated
     case screenUnlock
+    case deviceActivity
 }
 
 struct SessionRecoveryPlanner: Sendable {
@@ -178,6 +179,7 @@ struct SessionRecoveryPlanner: Sendable {
     ]
 
     private var lastRecoveryUptime: Duration?
+    private var awaitsHIDSettingsRestore = false
     private let coalescingWindow: Duration
 
     init(coalescingWindow: Duration = .seconds(1)) {
@@ -188,13 +190,20 @@ struct SessionRecoveryPlanner: Sendable {
         for signal: SessionRecoverySignal,
         uptime: Duration
     ) -> [Duration] {
-        _ = signal
+        if signal == .deviceActivity {
+            return awaitsHIDSettingsRestore ? [.zero] : []
+        }
+        awaitsHIDSettingsRestore = true
         if let lastRecoveryUptime,
            uptime - lastRecoveryUptime < coalescingWindow {
             return []
         }
         lastRecoveryUptime = uptime
         return Self.retryDelays
+    }
+
+    mutating func markHIDSettingsRestored() {
+        awaitsHIDSettingsRestore = false
     }
 }
 

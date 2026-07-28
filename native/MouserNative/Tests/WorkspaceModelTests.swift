@@ -14,6 +14,7 @@ private final class WorkspaceTestEventTap: ScrollEventTapping {
     private(set) var externalGestureBegins: [MouseButton] = []
     private(set) var externalGestureEnds: [MouseButton] = []
     private var buttonActionHandler: (@Sendable (MappedActionInvocation) -> Void)?
+    private var deviceActivityHandler: (@Sendable () -> Void)?
 
     func updateSettings(_ settings: ScrollInversionSettings) {
         self.settings.append(settings)
@@ -31,6 +32,16 @@ private final class WorkspaceTestEventTap: ScrollEventTapping {
         supplementalMappings = gestureMappings
         buttonMappings = mappings
         buttonActionHandler = actionHandler
+    }
+
+    func updateDeviceActivityHandler(
+        _ handler: @escaping @Sendable () -> Void
+    ) {
+        deviceActivityHandler = handler
+    }
+
+    func simulateDeviceActivity() {
+        deviceActivityHandler?()
     }
 
     func simulateMappedAction(_ actionID: String, buttonID: String = "xbutton1") {
@@ -257,6 +268,43 @@ private actor WorkspaceHIDDiscovery: LogitechDeviceDiscovering {
         identity: HIDPPDeviceIdentity
     ) -> (any HIDPPDeviceControlling)? {
         controller
+    }
+}
+
+private actor RecoveringWorkspaceHIDDiscovery: LogitechDeviceDiscovering {
+    let identity: HIDPPDeviceIdentity
+    let controller: any HIDPPDeviceControlling
+    private(set) var identifyCount = 0
+    private var available = false
+
+    init(
+        identity: HIDPPDeviceIdentity,
+        controller: any HIDPPDeviceControlling
+    ) {
+        self.identity = identity
+        self.controller = controller
+    }
+
+    nonisolated func updates() -> AsyncStream<[LogitechHIDDevice]> {
+        AsyncStream { $0.finish() }
+    }
+
+    func identify(_ device: LogitechHIDDevice) -> HIDPPDeviceIdentity? {
+        _ = device
+        identifyCount += 1
+        return available ? identity : nil
+    }
+
+    func controller(
+        for device: LogitechHIDDevice,
+        identity: HIDPPDeviceIdentity
+    ) -> (any HIDPPDeviceControlling)? {
+        _ = (device, identity)
+        return controller
+    }
+
+    func makeDeviceAvailable() {
+        available = true
     }
 }
 
@@ -1104,6 +1152,239 @@ struct WorkspaceModelTests {
             .horizontal(true),
         ])
         #expect(model.hidppStatusText == "已恢复设备设置")
+    }
+
+    @Test("mouse activity after late wake reapplies settings after unlock retries missed")
+    func lateMouseWakeReappliesSettingsOnDeviceActivity() async {
+        let controller = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: nil,
+            smartShift: nil,
+            battery: nil,
+            verticalScrollInverted: nil
+        ))
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [
+                .adjustableDPI: 0x0C,
+                .smartShift: 0x0D,
+                .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+            ]
+        )
+        let discovery = RecoveringWorkspaceHIDDiscovery(
+            identity: identity,
+            controller: controller
+        )
+        let eventTap = WorkspaceTestEventTap()
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: true,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftMode: .ratchet,
+            smartShiftThreshold: 10,
+            scrollForce: 10,
+            invertVerticalScroll: true,
+            invertHorizontalScroll: true,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: eventTap,
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 2,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+
+        model.handleSessionRecoverySignal(.screenUnlock)
+        for _ in 0..<50 where await discovery.identifyCount == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await controller.calls.isEmpty)
+        #expect(eventTap.state == .running)
+
+        await discovery.makeDeviceAvailable()
+        eventTap.simulateDeviceActivity()
+        for _ in 0..<50 where await controller.calls.count < 4 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(await controller.calls == [
+            .dpi(1600),
+            .smartShift(.ratchet, false, 10, 10),
+            .vertical(true),
+            .horizontal(true),
+        ])
+    }
+
+    @Test("HID re-enumeration after unlock reapplies config instead of importing reset state")
+    func reenumerationAfterUnlockReappliesConfiguredState() async {
+        let controller = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: 800,
+            smartShift: HIDPPSmartShiftState(
+                mode: .freeSpin,
+                automatic: false,
+                threshold: 25,
+                scrollForce: 50
+            ),
+            battery: nil,
+            verticalScrollInverted: false
+        ))
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [
+                .adjustableDPI: 0x0C,
+                .smartShift: 0x0D,
+                .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+            ]
+        )
+        let discovery = RecoveringWorkspaceHIDDiscovery(
+            identity: identity,
+            controller: controller
+        )
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: true,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftMode: .ratchet,
+            smartShiftThreshold: 10,
+            scrollForce: 10,
+            invertVerticalScroll: true,
+            invertHorizontalScroll: true,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true
+        )
+        let receiver = LogitechHIDDevice(
+            id: 2,
+            productID: 0xC52B,
+            productName: "USB Receiver",
+            transport: "USB",
+            usagePage: 0xFF00,
+            usage: 1
+        )
+        model.applyDetectedDevices([receiver])
+        model.handleSessionRecoverySignal(.screenUnlock)
+        for _ in 0..<50 where await discovery.identifyCount == 0 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        await discovery.makeDeviceAvailable()
+        model.handleDetectedDevicesUpdate([receiver])
+        for _ in 0..<50 where await controller.calls.count < 4 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(model.dpi == 1600)
+        #expect(model.smartShiftMode == .ratchet)
+        #expect(model.smartShiftThreshold == 10)
+        #expect(model.scrollForce == 10)
+        #expect(await controller.calls == [
+            .dpi(1600),
+            .smartShift(.ratchet, false, 10, 10),
+            .vertical(true),
+            .horizontal(true),
+        ])
+    }
+
+    @Test("initial HID discovery restores persisted settings instead of importing device defaults")
+    func initialHIDDiscoveryRestoresPersistedSettings() async {
+        let controller = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: 1000,
+            smartShift: HIDPPSmartShiftState(
+                mode: .ratchet,
+                automatic: true,
+                threshold: 10,
+                scrollForce: 10
+            ),
+            battery: nil,
+            verticalScrollInverted: false
+        ))
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [
+                .adjustableDPI: 0x0C,
+                .smartShift: 0x0D,
+                .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+            ]
+        )
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftMode: .ratchet,
+            smartShiftThreshold: 10,
+            scrollForce: 10,
+            invertVerticalScroll: true,
+            invertHorizontalScroll: true,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: WorkspaceHIDDiscovery(
+                identity: identity,
+                controller: controller
+            ),
+            nativeHIDProbeEnabled: true
+        )
+
+        model.handleDetectedDevicesUpdate([
+            LogitechHIDDevice(
+                id: 2,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+        for _ in 0..<50 where await controller.calls.count < 4 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(model.dpi == 1600)
+        #expect(model.smartShiftMode == .ratchet)
+        #expect(model.smartShiftThreshold == 10)
+        #expect(model.scrollForce == 10)
+        #expect(await controller.calls == [
+            .dpi(1600),
+            .smartShift(.ratchet, false, 10, 10),
+            .vertical(true),
+            .horizontal(true),
+        ])
     }
 
     @Test("haptic controls write through to hardware and preview a waveform")

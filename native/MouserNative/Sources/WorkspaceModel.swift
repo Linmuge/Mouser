@@ -690,6 +690,9 @@ final class WorkspaceModel {
     @ObservationIgnored private var pendingHIDWrites: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var recoveryPlanner = SessionRecoveryPlanner()
     @ObservationIgnored private var recoveryTasks: [Task<Void, Never>] = []
+    @ObservationIgnored private var deviceActivityRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var awaitingHIDWakeRecovery = false
+    @ObservationIgnored private var hidRecoveryInProgress = false
     @ObservationIgnored private var hidProbeTask: Task<Void, Never>?
     @ObservationIgnored private var batteryMonitorTask: Task<Void, Never>?
     @ObservationIgnored private var specialButtonTask: Task<Void, Never>?
@@ -745,7 +748,7 @@ final class WorkspaceModel {
         screenshotDirectory: String = "",
         currentVersion: String = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "3.8.2",
+        ) as? String ?? "3.8.3",
         gestureThreshold: Double = 50,
         gestureCommitWindowMilliseconds: Double = 400,
         gestureSettleMilliseconds: Double = 90,
@@ -836,6 +839,11 @@ final class WorkspaceModel {
             buttonIDs: Set(hapticButtonIDs),
             deduplicates: hapticDedup
         )
+        eventTap.updateDeviceActivityHandler { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleDeviceActivityForRecovery()
+            }
+        }
         configureButtonMappings()
     }
 
@@ -849,6 +857,7 @@ final class WorkspaceModel {
         for task in recoveryTasks {
             task.cancel()
         }
+        deviceActivityRecoveryTask?.cancel()
         hidProbeTask?.cancel()
         batteryMonitorTask?.cancel()
         specialButtonTask?.cancel()
@@ -1292,11 +1301,23 @@ final class WorkspaceModel {
     func monitorLogitechDevices() async {
         for await devices in deviceDiscovery.updates() {
             guard !Task.isCancelled else { return }
-            applyDetectedDevices(devices)
-            if nativeHIDProbeEnabled {
-                launchHIDProbe()
-            }
+            handleDetectedDevicesUpdate(devices)
         }
+    }
+
+    func handleDetectedDevicesUpdate(_ devices: [LogitechHIDDevice]) {
+        applyDetectedDevices(devices)
+        guard nativeHIDProbeEnabled else { return }
+        let hasHIDPPInterface = LogitechDeviceInventory.preferredHIDPPInterface(
+            from: devices
+        ) != nil
+        let shouldRestoreSettings = awaitingHIDWakeRecovery ||
+            (hasHIDPPInterface && hidppController == nil)
+        if shouldRestoreSettings {
+            awaitingHIDWakeRecovery = true
+            synchronizeEventTap()
+        }
+        launchHIDProbe(reapplySettings: shouldRestoreSettings)
     }
 
     func applyDetectedDevices(_ devices: [LogitechHIDDevice]) {
@@ -1357,28 +1378,29 @@ final class WorkspaceModel {
         synchronizeEventTap()
     }
 
-    func refreshHIDPPIdentity(reapplySettings: Bool = false) async {
+    @discardableResult
+    func refreshHIDPPIdentity(reapplySettings: Bool = false) async -> Bool {
         guard nativeHIDProbeEnabled else {
             hidppStatusText = "未启用"
-            return
+            return false
         }
         guard let device = LogitechDeviceInventory.preferredHIDPPInterface(
             from: detectedLogitechDevices
         ) else {
             clearHIDPPConnection(status: "等待 HID++ 接口")
-            return
+            return false
         }
 
         hidppStatusText = "正在探测设备…"
         let detectedIdentity = await deviceDiscovery.identify(device)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
         guard let identity = detectedIdentity else {
             clearHIDPPConnection(status: "未在接收器中找到兼容鼠标")
             applyDetectedDevices(detectedLogitechDevices)
-            return
+            return false
         }
         let controller = await deviceDiscovery.controller(for: device, identity: identity)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
 
         specialButtonTask?.cancel()
         specialButtonTask = nil
@@ -1393,7 +1415,7 @@ final class WorkspaceModel {
             hidppStatusText = identity.deviceIndex == 0xFF
                 ? "已识别 · 蓝牙直连"
                 : "已识别 · 接收器槽位 \(identity.deviceIndex)"
-            return
+            return false
         }
 
         hidppControls = await hidppController.readReprogrammableControls(
@@ -1403,9 +1425,14 @@ final class WorkspaceModel {
             selectedButton = availableButtons.first ?? .back
         }
 
+        let settingsRestored: Bool
         if reapplySettings {
-            await restoreHIDPPSettings(using: hidppController, identity: identity)
+            settingsRestored = await restoreHIDPPSettings(
+                using: hidppController,
+                identity: identity
+            )
         } else {
+            settingsRestored = true
             let state = await hidppController.readState(timeout: .milliseconds(700))
             applyHIDPPState(state)
             if wheelInversionBackend == .macOS {
@@ -1425,12 +1452,20 @@ final class WorkspaceModel {
         }
         startBatteryMonitoring(using: hidppController)
         launchSpecialButtonStream()
+        return settingsRestored
     }
 
-    private func launchHIDProbe() {
+    private func launchHIDProbe(reapplySettings: Bool = false) {
         hidProbeTask?.cancel()
         hidProbeTask = Task { [weak self] in
-            await self?.refreshHIDPPIdentity()
+            guard let self else { return }
+            if reapplySettings {
+                if await self.attemptHIDWakeRecovery() {
+                    self.finishHIDWakeRecovery()
+                }
+            } else {
+                await self.refreshHIDPPIdentity()
+            }
         }
     }
 
@@ -1507,7 +1542,7 @@ final class WorkspaceModel {
     private func restoreHIDPPSettings(
         using controller: any HIDPPDeviceControlling,
         identity: HIDPPDeviceIdentity
-    ) async {
+    ) async -> Bool {
         var failureCount = 0
 
         if identity.featureIndexes[.adjustableDPI] != nil {
@@ -1576,6 +1611,7 @@ final class WorkspaceModel {
         hidppStatusText = failureCount == 0
             ? "已恢复设备设置"
             : "部分设备设置恢复失败（\(failureCount)）"
+        return failureCount == 0
     }
 
     private func scheduleDPIWrite() {
@@ -1720,14 +1756,14 @@ final class WorkspaceModel {
             of: workspace,
             for: .didWake,
             using: { [weak self] _ in
-                self?.scheduleRecovery(for: .wake)
+                self?.handleSessionRecoverySignal(.wake)
             }
         ))
         workspaceObservationTokens.append(center.addObserver(
             of: workspace,
             for: .sessionDidBecomeActive,
             using: { [weak self] _ in
-                self?.scheduleRecovery(for: .sessionActivated)
+                self?.handleSessionRecoverySignal(.sessionActivated)
             }
         ))
         workspaceObservationTokens.append(center.addObserver(
@@ -1746,7 +1782,7 @@ final class WorkspaceModel {
                 queue: .main,
                 using: { [weak self] _ in
                     Task { @MainActor [weak self] in
-                        self?.scheduleRecovery(for: .screenUnlock)
+                        self?.handleSessionRecoverySignal(.screenUnlock)
                     }
                 }
             )
@@ -1759,7 +1795,7 @@ final class WorkspaceModel {
         var detector = ConsoleLockTransitionDetector()
         while !Task.isCancelled {
             if detector.observe(reader.read()) {
-                scheduleRecovery(for: .screenUnlock)
+                handleSessionRecoverySignal(.screenUnlock)
             }
             do {
                 try await Task.sleep(for: .milliseconds(500))
@@ -2049,7 +2085,10 @@ final class WorkspaceModel {
     }
 
     private var requiresEventTap: Bool {
-        remappingEnabled && (
+        if awaitingHIDWakeRecovery && nativeHIDProbeEnabled {
+            return true
+        }
+        return remappingEnabled && (
             hasActiveOSButtonMappings ||
                 (usesMacOSWheelInversion && (invertVerticalScroll || invertHorizontalScroll))
         )
@@ -2476,10 +2515,14 @@ final class WorkspaceModel {
         appendDebugEvent("gesture \(message)")
     }
 
-    private func scheduleRecovery(for signal: SessionRecoverySignal) {
+    func handleSessionRecoverySignal(_ signal: SessionRecoverySignal) {
         guard (requiresEventTap && accessibilityGranted) ||
                 nativeHIDProbeEnabled
         else { return }
+        if nativeHIDProbeEnabled {
+            awaitingHIDWakeRecovery = true
+            synchronizeEventTap()
+        }
         let uptime = Duration.seconds(ProcessInfo.processInfo.systemUptime)
         let delays = recoveryPlanner.schedule(for: signal, uptime: uptime)
         guard !delays.isEmpty else { return }
@@ -2499,8 +2542,11 @@ final class WorkspaceModel {
                         _ = self.eventTap.rebuild()
                         self.eventTapState = self.eventTap.state
                     }
-                    if self.nativeHIDProbeEnabled {
-                        await self.refreshHIDPPIdentity(reapplySettings: true)
+                    if self.nativeHIDProbeEnabled,
+                       self.awaitingHIDWakeRecovery,
+                       await self.attemptHIDWakeRecovery()
+                    {
+                        self.finishHIDWakeRecovery()
                     }
                 } catch is CancellationError {
                     return
@@ -2509,6 +2555,41 @@ final class WorkspaceModel {
                 }
             }
         }
+    }
+
+    private func handleDeviceActivityForRecovery() {
+        guard nativeHIDProbeEnabled,
+              awaitingHIDWakeRecovery,
+              !hidRecoveryInProgress,
+              deviceActivityRecoveryTask == nil
+        else { return }
+        let uptime = Duration.seconds(ProcessInfo.processInfo.systemUptime)
+        guard !recoveryPlanner.schedule(
+            for: .deviceActivity,
+            uptime: uptime
+        ).isEmpty else { return }
+
+        deviceActivityRecoveryTask = Task { [weak self] in
+            guard let self else { return }
+            let restored = await self.attemptHIDWakeRecovery()
+            self.deviceActivityRecoveryTask = nil
+            if restored {
+                self.finishHIDWakeRecovery()
+            }
+        }
+    }
+
+    private func attemptHIDWakeRecovery() async -> Bool {
+        guard !hidRecoveryInProgress else { return false }
+        hidRecoveryInProgress = true
+        defer { hidRecoveryInProgress = false }
+        return await refreshHIDPPIdentity(reapplySettings: true)
+    }
+
+    private func finishHIDWakeRecovery() {
+        awaitingHIDWakeRecovery = false
+        recoveryPlanner.markHIDSettingsRestored()
+        synchronizeEventTap()
     }
 
     private func persistSetting(_ key: String, value: JSONValue) {
