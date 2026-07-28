@@ -386,6 +386,7 @@ final class WorkspaceModel {
     var selectedSection: WorkspaceSection = .overview
     var selectedProfileID: String
     var selectedButton: MouseButton = .back
+    var selectedActionsRingIndex = 5
 
     func localized(_ key: String) -> String {
         language.localized(key)
@@ -748,7 +749,7 @@ final class WorkspaceModel {
         screenshotDirectory: String = "",
         currentVersion: String = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "3.8.3",
+        ) as? String ?? "4.0.0",
         gestureThreshold: Double = 50,
         gestureCommitWindowMilliseconds: Double = 400,
         gestureSettleMilliseconds: Double = 90,
@@ -2674,12 +2675,12 @@ final class WorkspaceModel {
             ButtonMapping(button: .forward, action: .browserForward),
             ButtonMapping(button: .gesture, action: .missionControl),
         ]
-        return WorkspaceModel(
+        let model = WorkspaceModel(
             selectedProfileID: "default",
-            accessibilityGranted: false,
+            accessibilityGranted: true,
             mouseConnected: true,
             batteryLevel: 82,
-            dpi: 1300,
+            dpi: 1000,
             smartShiftEnabled: true,
             smartShiftMode: .ratchet,
             smartShiftThreshold: 25,
@@ -2688,15 +2689,35 @@ final class WorkspaceModel {
             invertHorizontalScroll: false,
             ignoreTrackpad: true,
             hapticsEnabled: true,
-            hapticStrength: 2,
+            hapticStrength: 1.68,
             appearanceMode: .system,
+            language: .simplifiedChinese,
+            startAtLogin: true,
+            actionsRingHoldMilliseconds: 420,
+            actionsRingUsesGlobalSlots: false,
+            actionsRingGlobalSlots: [
+                MouserAction.missionControl.rawValue,
+                MouserAction.browserForward.rawValue,
+                MouserAction.copy.rawValue,
+                MouserAction.paste.rawValue,
+                MouserAction.showDesktop.rawValue,
+                MouserAction.browserBack.rawValue,
+                MouserAction.screenshotRegionFile.rawValue,
+                MouserAction.playPause.rawValue,
+            ],
             profiles: [
-                AppProfile(id: "default", name: "默认", bundleID: nil, systemImage: "square.grid.2x2", mappings: defaultMappings),
+                AppProfile(id: "default", name: "默认配置", bundleID: nil, systemImage: "square.grid.2x2", mappings: defaultMappings),
+                AppProfile(id: "chrome", name: "Google Chrome", bundleID: "com.google.Chrome", systemImage: "globe", mappings: finderMappings),
+                AppProfile(id: "code", name: "Visual Studio Code", bundleID: "com.microsoft.VSCode", systemImage: "chevron.left.forwardslash.chevron.right", mappings: defaultMappings),
+                AppProfile(id: "vlc", name: "VLC", bundleID: "org.videolan.vlc", systemImage: "play.rectangle", mappings: defaultMappings),
                 AppProfile(id: "finder", name: "Finder", bundleID: "com.apple.finder", systemImage: "face.smiling", mappings: finderMappings),
                 AppProfile(id: "safari", name: "Safari", bundleID: "com.apple.Safari", systemImage: "safari", mappings: defaultMappings),
-                AppProfile(id: "code", name: "Visual Studio Code", bundleID: "com.microsoft.VSCode", systemImage: "chevron.left.forwardslash.chevron.right", mappings: defaultMappings),
             ]
         )
+        model.deviceName = "MX Master 3S"
+        model.deviceTransport = "Logi Bolt"
+        model.configurationLoaded = true
+        return model
     }
 
     private static var fallbackProfiles: [AppProfile] {

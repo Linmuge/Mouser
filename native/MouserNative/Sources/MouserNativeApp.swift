@@ -9,11 +9,11 @@ struct MouserNativeApp: App {
     var body: some Scene {
         Window("Mouser", id: "settings") {
             ContentView(model: appDelegate.model)
-                .frame(minWidth: 980, minHeight: 660)
+                .frame(minWidth: 1_052, minHeight: 620)
                 .environment(\.locale, appDelegate.model.language.locale)
         }
-        .defaultSize(width: 1120, height: 760)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .defaultSize(width: 1_320, height: 788)
+        .windowStyle(.hiddenTitleBar)
 
         MenuBarExtra {
             MouserMenuBarContent(model: appDelegate.model)
@@ -27,8 +27,18 @@ struct MouserNativeApp: App {
 
 @MainActor
 final class MouserAppDelegate: NSObject, NSApplicationDelegate {
-    let model = WorkspaceModel.live()
+    let model: WorkspaceModel
     private var runtimeTask: Task<Void, Never>?
+
+    override init() {
+        let previewMode = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+        if previewMode == "MouserUIPreview" || previewMode == "MouserUIPreviewCompact" {
+            model = .preview
+        } else {
+            model = .live()
+        }
+        super.init()
+    }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         guard MacUpdateInstallHelper.runIfRequested() else { return }
@@ -37,6 +47,11 @@ final class MouserAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let previewMode = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+        if previewMode == "MouserUIPreview" || previewMode == "MouserUIPreviewCompact" {
+            configureVisualPreviewWindow()
+            return
+        }
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
             return
         }
@@ -62,6 +77,31 @@ final class MouserAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         runtimeTask?.cancel()
+    }
+
+    private func configureVisualPreviewWindow() {
+        Task { @MainActor in
+            for _ in 0..<20 {
+                if let window = NSApp.windows.first(where: \.canBecomeMain) {
+                    let compact = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == "MouserUIPreviewCompact"
+                    let approvedSize = compact
+                        ? NSSize(width: 1_052, height: 652)
+                        : NSSize(width: 1_320, height: 820)
+                    if compact {
+                        model.selectedSection = .buttons
+                    }
+                    var frame = window.frame
+                    frame.origin.y += frame.height - approvedSize.height
+                    frame.size = approvedSize
+                    window.setFrame(frame, display: true)
+                    window.center()
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
     }
 
     func applicationShouldHandleReopen(

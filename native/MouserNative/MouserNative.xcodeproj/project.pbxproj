@@ -15,6 +15,7 @@
 		0769D5A083BBB1DF889367E8 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DA225929E9E518E77FF3492 /* OverviewView.swift */; };
 		0AB6C251801056EF5448C4A1 /* MouseButtonEventRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396892654545552ACB4133A5 /* MouseButtonEventRouterTests.swift */; };
 		0CA6A182EFEBA1007BECA636 /* MouseButtonStageLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46811830E4139AA8B80A9FB9 /* MouseButtonStageLayoutTests.swift */; };
+		0CCF94343C96D38C4D2D2633 /* PrecisionWorkspaceInspectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4419FA33FEF54BF912361E08 /* PrecisionWorkspaceInspectors.swift */; };
 		1526753B89C939BA3507502A /* GestureRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5746A11357653CC0FD16A618 /* GestureRecognizerTests.swift */; };
 		1B24F35C40FCEBF4EBD0DF81 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3291E9AB86B6C1ABDC7CA528 /* DesignSystem.swift */; };
 		1DB910FC19A5D6A54D763B6B /* LoginItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0193BD2E232A78A734827258 /* LoginItemController.swift */; };
@@ -27,6 +28,7 @@
 		3838CF4BB21B15D40A5E26E5 /* HIDPPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FFE8B8C30DA3F591037837 /* HIDPPProtocol.swift */; };
 		3D9115A59FE08809767C6E08 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A24CB44257506AD573470F /* ContentView.swift */; };
 		46BE747A4084D70AE7752EA3 /* AccessibilityAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266C4E066DE7D66DD25B9355 /* AccessibilityAuthorizationTests.swift */; };
+		49CFE668FB292C2D2CF4A660 /* NativeVisualDesignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A458E7833E3CAB01FC8D7EDF /* NativeVisualDesignTests.swift */; };
 		74DB4C9F7FA8BF0AE92D62A9 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60FE86CC809D8B17E621A04 /* UpdateService.swift */; };
 		760911D6742454CB0188A54D /* HIDPPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E0401CCD21988E6B515D213 /* HIDPPSessionTests.swift */; };
 		77803C046C0DA211E0CD9A04 /* AccessibilityAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4918C47AF39A07A1FC0EFCCE /* AccessibilityAuthorization.swift */; };
@@ -41,6 +43,7 @@
 		9C21E49624E831024AE739C6 /* LogitechDeviceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D6E9F82E39CF21E144C0458 /* LogitechDeviceCatalog.swift */; };
 		A0FD3D36181FECA8A7BE95F0 /* HIDPPButtonEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8520F0BBA7926707FB8108F /* HIDPPButtonEvents.swift */; };
 		A2894C53312D5C6A3162A39E /* UpdateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2141DC6F660D08602AC502B9 /* UpdateServiceTests.swift */; };
+		AACD62779A6D8B03532F9898 /* PrecisionWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2ABE0C0542033D114652B21 /* PrecisionWorkspaceView.swift */; };
 		B4FC83B37E582CE4E07C43C5 /* SessionRecoveryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */; };
 		B5C040D34DC4A270B971EF5B /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A343B759D6721A35FFB50535 /* SidebarView.swift */; };
 		B7694479813567F7E387AA41 /* GestureRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5434136E2EB2DA301B4960D0 /* GestureRecognizer.swift */; };
@@ -53,6 +56,7 @@
 		D2B5F49478F5E3C52B6A2364 /* HIDPPButtonEventRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4FE3DA9253EE1DC84B9C7E9 /* HIDPPButtonEventRouterTests.swift */; };
 		D3CA717AD6ACA55E18C9C7D5 /* ApplicationBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6385FC426B042B5570467833 /* ApplicationBundleTests.swift */; };
 		DA1F29298E68346A09AA79F3 /* ScrollEventPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C45208049DEC4505482E6D /* ScrollEventPipeline.swift */; };
+		DDA4C275E274773F2F69FAB4 /* PrecisionWorkspaceStages.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A151E93D0562F251BD88CC /* PrecisionWorkspaceStages.swift */; };
 		DDC9F81C7AE7EFABFC1AD1CE /* MouserConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */; };
 		E09E78D9063C5533182962A9 /* mouse_mx_anywhere_3s.png in Resources */ = {isa = PBXBuildFile; fileRef = 944FD866D487D2AB1670A265 /* mouse_mx_anywhere_3s.png */; };
 		E1B739C8CC43D521C6618DA1 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2539B7ACCD82E32EB150DD01 /* WorkspaceModel.swift */; };
@@ -95,6 +99,7 @@
 		3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecoveryMonitor.swift; sourceTree = "<group>"; };
 		40F1FFEF5C77FFBECE0D48E0 /* DiagnosticEventLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticEventLog.swift; sourceTree = "<group>"; };
 		426CFB45067B7AA9F23FE730 /* MouserConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouserConfigStore.swift; sourceTree = "<group>"; };
+		4419FA33FEF54BF912361E08 /* PrecisionWorkspaceInspectors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrecisionWorkspaceInspectors.swift; sourceTree = "<group>"; };
 		451938A77A4035BA38EAF2B0 /* WorkspaceModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModelTests.swift; sourceTree = "<group>"; };
 		45A24CB44257506AD573470F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		46811830E4139AA8B80A9FB9 /* MouseButtonStageLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseButtonStageLayoutTests.swift; sourceTree = "<group>"; };
@@ -117,8 +122,10 @@
 		981ABA13CB1CFFBEA73C9356 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
 		98BB1172DEE48F34F9BF7049 /* ButtonsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonsView.swift; sourceTree = "<group>"; };
 		A343B759D6721A35FFB50535 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		A458E7833E3CAB01FC8D7EDF /* NativeVisualDesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVisualDesignTests.swift; sourceTree = "<group>"; };
 		A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouserConfigStoreTests.swift; sourceTree = "<group>"; };
 		ABA696EC0FC2139F70C612F6 /* HIDPPDeviceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPDeviceControllerTests.swift; sourceTree = "<group>"; };
+		B2ABE0C0542033D114652B21 /* PrecisionWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrecisionWorkspaceView.swift; sourceTree = "<group>"; };
 		B40C00C43E8C0985B1201538 /* HIDPPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPSession.swift; sourceTree = "<group>"; };
 		B4FE3DA9253EE1DC84B9C7E9 /* HIDPPButtonEventRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPButtonEventRouterTests.swift; sourceTree = "<group>"; };
 		B5D20A215BBC7784FA75DB17 /* HIDReportNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDReportNormalizer.swift; sourceTree = "<group>"; };
@@ -127,6 +134,7 @@
 		BB23FFE60FE63161A507D5DC /* HIDPPDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPDeviceController.swift; sourceTree = "<group>"; };
 		C30AE3ADC5BFC37E9F854E9B /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		C4D4346B14DAC4B8EC6BE8F4 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		C5A151E93D0562F251BD88CC /* PrecisionWorkspaceStages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrecisionWorkspaceStages.swift; sourceTree = "<group>"; };
 		CA523D8F51CAFE8723C8AE25 /* MouserNativeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouserNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D1017F31C4D137BC954C593B /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		D4C6B921262B6D750C60B49C /* IOKitHIDReportTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOKitHIDReportTransport.swift; sourceTree = "<group>"; };
@@ -158,6 +166,7 @@
 				396892654545552ACB4133A5 /* MouseButtonEventRouterTests.swift */,
 				46811830E4139AA8B80A9FB9 /* MouseButtonStageLayoutTests.swift */,
 				A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */,
+				A458E7833E3CAB01FC8D7EDF /* NativeVisualDesignTests.swift */,
 				687A443D78C4C4DE47274C65 /* ScrollEventPipelineTests.swift */,
 				2141DC6F660D08602AC502B9 /* UpdateServiceTests.swift */,
 				451938A77A4035BA38EAF2B0 /* WorkspaceModelTests.swift */,
@@ -194,6 +203,9 @@
 				426CFB45067B7AA9F23FE730 /* MouserConfigStore.swift */,
 				EDF136E861CF8BE646F7584F /* MouserNativeApp.swift */,
 				0DA225929E9E518E77FF3492 /* OverviewView.swift */,
+				4419FA33FEF54BF912361E08 /* PrecisionWorkspaceInspectors.swift */,
+				C5A151E93D0562F251BD88CC /* PrecisionWorkspaceStages.swift */,
+				B2ABE0C0542033D114652B21 /* PrecisionWorkspaceView.swift */,
 				B8C45208049DEC4505482E6D /* ScrollEventPipeline.swift */,
 				3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */,
 				981ABA13CB1CFFBEA73C9356 /* SettingsViews.swift */,
@@ -376,6 +388,9 @@
 				83AEA03C0062211C9EAE5BA7 /* MouserConfigStore.swift in Sources */,
 				21267ACA9C1F0BD62D388B84 /* MouserNativeApp.swift in Sources */,
 				0769D5A083BBB1DF889367E8 /* OverviewView.swift in Sources */,
+				0CCF94343C96D38C4D2D2633 /* PrecisionWorkspaceInspectors.swift in Sources */,
+				DDA4C275E274773F2F69FAB4 /* PrecisionWorkspaceStages.swift in Sources */,
+				AACD62779A6D8B03532F9898 /* PrecisionWorkspaceView.swift in Sources */,
 				DA1F29298E68346A09AA79F3 /* ScrollEventPipeline.swift in Sources */,
 				B4FC83B37E582CE4E07C43C5 /* SessionRecoveryMonitor.swift in Sources */,
 				974D8C3023CAE3E34B9459EF /* SettingsViews.swift in Sources */,
@@ -405,6 +420,7 @@
 				0AB6C251801056EF5448C4A1 /* MouseButtonEventRouterTests.swift in Sources */,
 				0CA6A182EFEBA1007BECA636 /* MouseButtonStageLayoutTests.swift in Sources */,
 				DDC9F81C7AE7EFABFC1AD1CE /* MouserConfigStoreTests.swift in Sources */,
+				49CFE668FB292C2D2CF4A660 /* NativeVisualDesignTests.swift in Sources */,
 				F494B8B9661567A350363BE2 /* ScrollEventPipelineTests.swift in Sources */,
 				A2894C53312D5C6A3162A39E /* UpdateServiceTests.swift in Sources */,
 				C0D41CCEAC41E5CBEFA8F326 /* WorkspaceModelTests.swift in Sources */,
@@ -491,7 +507,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.8.3;
+				MARKETING_VERSION = 4.0.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -571,7 +587,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.8.3;
+				MARKETING_VERSION = 4.0.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

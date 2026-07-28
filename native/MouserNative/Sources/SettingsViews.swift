@@ -198,7 +198,10 @@ struct HapticsView: View {
     @Bindable var model: WorkspaceModel
 
     var body: some View {
-        SettingsPage(title: "触觉反馈", subtitle: "控制支持设备的反馈强度和触发时机。") {
+        SettingsPage(
+            title: "触觉反馈",
+            subtitle: "控制支持设备的反馈强度和触发时机。"
+        ) {
             SettingsGroup("触觉反馈") {
                 SettingRow(title: "启用触觉反馈", detail: "仅支持 MX Master 4 等兼容设备") {
                     Toggle("启用触觉反馈", isOn: $model.hapticsEnabled)
@@ -394,7 +397,10 @@ struct ProfilesView: View {
     @State private var pendingDeleteProfileID: String?
 
     var body: some View {
-        SettingsPage(title: "应用配置", subtitle: "切换到指定应用时自动应用独立映射。") {
+        SettingsPage(
+            title: "应用配置",
+            subtitle: "切换到指定应用时自动应用独立映射。"
+        ) {
             SettingsGroup("配置") {
                 ForEach(Array(model.profiles.enumerated()), id: \.element.id) { index, profile in
                     HStack(spacing: 8) {
@@ -532,7 +538,10 @@ struct AdvancedView: View {
     @State private var confirmsUpdateInstall = false
 
     var body: some View {
-        SettingsPage(title: "高级", subtitle: "启动、更新、诊断和设备识别选项。") {
+        SettingsPage(
+            title: "高级",
+            subtitle: "启动、更新、诊断和设备识别选项。"
+        ) {
             SettingsGroup("外观") {
                 SettingRow(title: "界面外观", detail: "默认随 macOS 自动切换") {
                     Picker("界面外观", selection: $model.appearanceMode) {
@@ -846,7 +855,11 @@ private struct SettingsPage<Content: View>: View {
     let subtitle: String
     @ViewBuilder let content: Content
 
-    init(title: String, subtitle: String, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.content = content()
@@ -857,8 +870,9 @@ private struct SettingsPage<Content: View>: View {
             VStack(alignment: .leading, spacing: 24) {
                 PageHeader(title: title, subtitle: subtitle)
                 content
+                    .mouserReveal(delay: 0.04)
             }
-            .padding(28)
+            .padding(24)
             .frame(maxWidth: 820, alignment: .leading)
             .frame(maxWidth: .infinity)
         }

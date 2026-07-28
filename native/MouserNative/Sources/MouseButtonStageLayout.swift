@@ -13,7 +13,7 @@ struct MouseButtonStageLayout: Equatable, Sendable {
 
     static func layout(for resourceName: String?) -> Self? {
         switch resourceName {
-        case "mx-master-3s":
+        case nil, "mx-master-3s":
             Self(
                 imageSize: CGSize(width: 636, height: 1024),
                 hotspots: [
@@ -89,6 +89,27 @@ struct MouseButtonStageLayout: Equatable, Sendable {
         return CGPoint(
             x: frame.minX + frame.width * normalizedPosition.x,
             y: frame.minY + frame.height * normalizedPosition.y
+        )
+    }
+
+    func position(
+        for button: MouseButton,
+        in imageFrame: CGRect,
+        rotationDegrees: CGFloat
+    ) -> CGPoint? {
+        guard let normalizedPosition = normalizedPosition(for: button) else { return nil }
+        let point = CGPoint(
+            x: imageFrame.minX + imageFrame.width * normalizedPosition.x,
+            y: imageFrame.minY + imageFrame.height * normalizedPosition.y
+        )
+        guard rotationDegrees != 0 else { return point }
+
+        let radians = rotationDegrees * .pi / 180
+        let deltaX = point.x - imageFrame.midX
+        let deltaY = point.y - imageFrame.midY
+        return CGPoint(
+            x: imageFrame.midX + deltaX * cos(radians) - deltaY * sin(radians),
+            y: imageFrame.midY + deltaX * sin(radians) + deltaY * cos(radians)
         )
     }
 }

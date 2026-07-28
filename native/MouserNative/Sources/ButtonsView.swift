@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ButtonsView: View {
     @Bindable var model: WorkspaceModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
@@ -11,19 +12,16 @@ struct ButtonsView: View {
                     subtitle: "选择鼠标上的按键，再指定按下时执行的动作。"
                 )
 
-                HStack(alignment: .top, spacing: 22) {
-                    MouseButtonStage(model: model)
-                        .frame(minWidth: 330, idealWidth: 430, maxWidth: 500)
-                    MappingEditor(model: model)
-                        .frame(minWidth: 310, idealWidth: 360, maxWidth: 410)
-                }
+                ButtonMappingStudio(model: model)
+                .mouserReveal(delay: 0.04)
 
                 HorizontalScrollMappingsSection(model: model)
+                    .mouserReveal(delay: 0.08)
 
                 SettingsGroup("全部按键", caption: "快速检查当前配置，点击一行继续编辑。") {
                     ForEach(Array(model.availableButtons.enumerated()), id: \.element) { index, button in
                         Button {
-                            withAnimation(.snappy(duration: 0.24)) {
+                            withAnimation(reduceMotion ? nil : MouserMotion.selection) {
                                 model.selectedButton = button
                             }
                         } label: {
@@ -59,11 +57,31 @@ struct ButtonsView: View {
                         }
                     }
                 }
+                .mouserReveal(delay: 0.12)
             }
-            .padding(28)
-            .frame(maxWidth: 980, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.top, 28)
+            .padding(.bottom, 36)
+            .frame(maxWidth: 1040, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
+    }
+}
+
+private struct ButtonMappingStudio: View {
+    @Bindable var model: WorkspaceModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            MouseButtonStage(model: model)
+                .frame(minWidth: 430, idealWidth: 540, maxWidth: .infinity)
+
+            MappingInspector(model: model)
+                .frame(width: 344)
+                .offset(x: -18)
+                .padding(.vertical, 18)
+        }
+        .padding(.trailing, -18)
     }
 }
 
@@ -106,14 +124,15 @@ private struct HorizontalScrollMappingsSection: View {
 
 private struct MouseButtonStage: View {
     @Bindable var model: WorkspaceModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var selectionNamespace
 
     private let imagePadding: CGFloat = 32
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(MouserStyle.accent.opacity(0.07))
+                MouseButtonStageBackdrop()
                 if let layout = MouseButtonStageLayout.layout(
                     for: model.deviceProfile.imageResource
                 ) {
@@ -124,7 +143,7 @@ private struct MouseButtonStage: View {
                     MouseImage(resourceName: model.deviceProfile.imageResource)
                         .frame(width: imageFrame.width, height: imageFrame.height)
                         .position(x: imageFrame.midX, y: imageFrame.midY)
-                        .shadow(color: .black.opacity(0.14), radius: 20, y: 12)
+                        .shadow(color: .black.opacity(0.22), radius: 30, y: 18)
 
                     ForEach(
                         layout.hotspots.filter {
@@ -139,9 +158,10 @@ private struct MouseButtonStage: View {
                             MouseHotspotButton(
                                 button: hotspot.button,
                                 isSelected: hotspot.button == model.selectedButton,
-                                localizedTitle: model.localized(hotspot.button.title)
+                                localizedTitle: model.localized(hotspot.button.title),
+                                selectionNamespace: selectionNamespace
                             ) {
-                                withAnimation(.snappy(duration: 0.24)) {
+                                withAnimation(reduceMotion ? nil : MouserMotion.selection) {
                                     model.selectedButton = hotspot.button
                                 }
                             }
@@ -151,11 +171,11 @@ private struct MouseButtonStage: View {
                 } else {
                     MouseImage(resourceName: model.deviceProfile.imageResource)
                         .padding(imagePadding)
-                        .shadow(color: .black.opacity(0.14), radius: 20, y: 12)
+                        .shadow(color: .black.opacity(0.22), radius: 30, y: 18)
                 }
             }
         }
-        .frame(height: 390)
+        .frame(height: 440)
         .accessibilityLabel(
             model.formatted(
                 "%@ 可交互按键示意图",
@@ -165,24 +185,102 @@ private struct MouseButtonStage: View {
     }
 }
 
+private struct MouseButtonStageBackdrop: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 30, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        MouserStyle.accent.opacity(0.18),
+                        Color.clear,
+                        MouserStyle.accentBlue.opacity(0.10),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.48),
+                                Color.primary.opacity(0.08),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+            }
+            .shadow(color: .black.opacity(0.08), radius: 32, y: 18)
+    }
+}
+
 private struct MouseHotspotButton: View {
     let button: MouseButton
     let isSelected: Bool
     let localizedTitle: String
+    let selectionNamespace: Namespace.ID
     let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            Circle()
-                .fill(isSelected ? MouserStyle.accent : .white.opacity(0.88))
-                .frame(
-                    width: isSelected ? 22 : 17,
-                    height: isSelected ? 22 : 17
-                )
-                .overlay {
-                    Circle().stroke(MouserStyle.accent, lineWidth: 3)
+            ZStack {
+                if isSelected {
+                    Circle()
+                        .fill(MouserStyle.accent.gradient)
+                        .matchedGeometryEffect(
+                            id: "selected-mouse-button",
+                            in: selectionNamespace
+                        )
                 }
-                .shadow(color: MouserStyle.accent.opacity(0.3), radius: 8)
+
+                Circle()
+                    .fill(.clear)
+                    .glassEffect(
+                        .regular
+                            .tint(
+                                isSelected
+                                    ? MouserStyle.accent.opacity(0.28)
+                                    : Color.white.opacity(0.68)
+                            )
+                            .interactive(),
+                        in: .circle
+                    )
+                    .overlay {
+                        Circle().stroke(
+                            isSelected ? Color.white.opacity(0.9) : MouserStyle.accent,
+                            lineWidth: isSelected ? 2 : 2.5
+                        )
+                    }
+            }
+            .frame(
+                width: isSelected ? 25 : 20,
+                height: isSelected ? 25 : 20
+            )
+            .scaleEffect(
+                isHovered && !reduceMotion
+                    ? 1.14
+                    : isSelected ? 1.06 : 1
+            )
+            .shadow(
+                color: MouserStyle.accent.opacity(
+                    isHovered ? 0.48 : isSelected ? 0.4 : 0.22
+                ),
+                radius: isHovered ? 12 : isSelected ? 10 : 6
+            )
+            .contentShape(Circle())
+            .onHover { isHovered = $0 }
+            .animation(
+                reduceMotion ? nil : MouserMotion.hover,
+                value: isHovered
+            )
         }
         .buttonStyle(.plain)
         .help(localizedTitle)
@@ -190,7 +288,7 @@ private struct MouseHotspotButton: View {
     }
 }
 
-private struct MappingEditor: View {
+private struct MappingInspector: View {
     @Bindable var model: WorkspaceModel
 
     private var selectedActionID: Binding<String> {
@@ -248,12 +346,18 @@ private struct MappingEditor: View {
                 .font(.caption)
                 .foregroundStyle(MouserStyle.connected)
         }
-        .padding(22)
+        .padding(24)
         .frame(
-            height: selectedActionID.wrappedValue == "gesture_swipe" ? 570 : 390,
+            minHeight: 404,
+            maxHeight: selectedActionID.wrappedValue == "gesture_swipe" ? 570 : 404,
             alignment: .topLeading
         )
-        .mouserGlass(cornerRadius: 22)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.white.opacity(0.44), lineWidth: 0.75)
+        }
+        .shadow(color: .black.opacity(0.11), radius: 26, y: 14)
     }
 }
 

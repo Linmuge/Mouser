@@ -419,6 +419,24 @@ private actor WorkspaceHIDController: HIDPPDeviceControlling {
 @Suite("Workspace navigation and presentation")
 @MainActor
 struct WorkspaceModelTests {
+    @Test("visual QA preview matches the approved B reference state")
+    func visualQAPreviewMatchesApprovedBReferenceState() {
+        let model = WorkspaceModel.preview
+
+        #expect(model.language == .simplifiedChinese)
+        #expect(model.accessibilityGranted)
+        #expect(model.mouseConnected)
+        #expect(model.deviceName == "MX Master 3S")
+        #expect(model.deviceTransport == "Logi Bolt")
+        #expect(model.batteryLevel == 82)
+        #expect(model.dpi == 1_000)
+        #expect(model.smartShiftEnabled)
+        #expect(model.invertVerticalScroll)
+        #expect(model.selectedProfile?.name == "默认配置")
+        #expect(!model.actionsRingUsesGlobalSlots)
+        #expect(model.configurationLoaded)
+    }
+
     @Test("manual mouse artwork override preserves discovered hardware DPI range")
     func manualDeviceLayoutOverrideIsVisualOnly() {
         let model = WorkspaceModel.preview
