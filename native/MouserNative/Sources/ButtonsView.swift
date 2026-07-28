@@ -107,42 +107,51 @@ private struct HorizontalScrollMappingsSection: View {
 private struct MouseButtonStage: View {
     @Bindable var model: WorkspaceModel
 
-    private let hotspots: [(MouseButton, CGFloat, CGFloat)] = [
-        (.middle, 0.54, 0.28),
-        (.modeShift, 0.57, 0.42),
-        (.back, 0.35, 0.56),
-        (.forward, 0.40, 0.46),
-        (.gesture, 0.29, 0.67),
-        (.actionsRing, 0.24, 0.73),
-        (.dpiSwitch, 0.52, 0.19),
-    ]
+    private let imagePadding: CGFloat = 32
 
     var body: some View {
         GeometryReader { proxy in
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(MouserStyle.accent.opacity(0.07))
-                MouseImage(resourceName: model.deviceProfile.imageResource)
-                    .padding(32)
-                    .shadow(color: .black.opacity(0.14), radius: 20, y: 12)
+                if let layout = MouseButtonStageLayout.layout(
+                    for: model.deviceProfile.imageResource
+                ) {
+                    let imageFrame = layout.imageFrame(
+                        in: proxy.size,
+                        padding: imagePadding
+                    )
+                    MouseImage(resourceName: model.deviceProfile.imageResource)
+                        .frame(width: imageFrame.width, height: imageFrame.height)
+                        .position(x: imageFrame.midX, y: imageFrame.midY)
+                        .shadow(color: .black.opacity(0.14), radius: 20, y: 12)
 
-                ForEach(hotspots.filter { model.availableButtons.contains($0.0) }, id: \.0) { button, x, y in
-                    Button {
-                        withAnimation(.snappy(duration: 0.24)) {
-                            model.selectedButton = button
+                    ForEach(
+                        layout.hotspots.filter {
+                            model.availableButtons.contains($0.button)
                         }
-                    } label: {
-                        Circle()
-                            .fill(button == model.selectedButton ? MouserStyle.accent : .white.opacity(0.88))
-                            .frame(width: button == model.selectedButton ? 22 : 17, height: button == model.selectedButton ? 22 : 17)
-                            .overlay {
-                                Circle().stroke(MouserStyle.accent, lineWidth: 3)
+                    ) { hotspot in
+                        if let position = layout.position(
+                            for: hotspot.button,
+                            in: proxy.size,
+                            padding: imagePadding
+                        ) {
+                            MouseHotspotButton(
+                                button: hotspot.button,
+                                isSelected: hotspot.button == model.selectedButton,
+                                localizedTitle: model.localized(hotspot.button.title)
+                            ) {
+                                withAnimation(.snappy(duration: 0.24)) {
+                                    model.selectedButton = hotspot.button
+                                }
                             }
-                            .shadow(color: MouserStyle.accent.opacity(0.3), radius: 8)
+                            .position(position)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help(model.localized(button.title))
-                    .position(x: proxy.size.width * x, y: proxy.size.height * y)
+                } else {
+                    MouseImage(resourceName: model.deviceProfile.imageResource)
+                        .padding(imagePadding)
+                        .shadow(color: .black.opacity(0.14), radius: 20, y: 12)
                 }
             }
         }
@@ -153,6 +162,31 @@ private struct MouseButtonStage: View {
                 model.localizedRuntime(model.deviceName)
             )
         )
+    }
+}
+
+private struct MouseHotspotButton: View {
+    let button: MouseButton
+    let isSelected: Bool
+    let localizedTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Circle()
+                .fill(isSelected ? MouserStyle.accent : .white.opacity(0.88))
+                .frame(
+                    width: isSelected ? 22 : 17,
+                    height: isSelected ? 22 : 17
+                )
+                .overlay {
+                    Circle().stroke(MouserStyle.accent, lineWidth: 3)
+                }
+                .shadow(color: MouserStyle.accent.opacity(0.3), radius: 8)
+        }
+        .buttonStyle(.plain)
+        .help(localizedTitle)
+        .accessibilityLabel(localizedTitle)
     }
 }
 

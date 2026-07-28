@@ -35,7 +35,7 @@ struct ApplicationBundleTests {
         #expect(
             bundle.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString"
-            ) as? String == "3.8.1"
+            ) as? String == "3.8.2"
         )
         #expect(
             bundle.object(

@@ -745,7 +745,7 @@ final class WorkspaceModel {
         screenshotDirectory: String = "",
         currentVersion: String = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "3.8.1",
+        ) as? String ?? "3.8.2",
         gestureThreshold: Double = 50,
         gestureCommitWindowMilliseconds: Double = 400,
         gestureSettleMilliseconds: Double = 90,
