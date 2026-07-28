@@ -47,49 +47,28 @@ jobs:
           path: Mouser-Windows.zip
 
   build-macos:
-    name: build-macos (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Apple Silicon
-            runner: macos-15
-            python_architecture: arm64
-            pyinstaller_target_arch: arm64
-            artifact_name: Mouser-macOS
-            archive_name: Mouser-macOS.zip
-          - name: Intel
-            runner: macos-15-intel
-            python_architecture: x64
-            pyinstaller_target_arch: x86_64
-            artifact_name: Mouser-macOS-intel
-            archive_name: Mouser-macOS-intel.zip
-    runs-on: ${{ matrix.runner }}
+    name: build-macos-native
+    runs-on: [self-hosted, macOS, mouser-release]
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          architecture: ${{ matrix.python_architecture }}
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Build macOS app
-        env:
-          PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstaller_target_arch }}
+      - name: Build, sign and notarize native universal DMGs
+        shell: zsh
         run: |
-          chmod +x build_macos_app.sh
-          ./build_macos_app.sh
-
-      - name: Create archive
-        run: cd dist && zip -r -y "../${{ matrix.archive_name }}" Mouser.app
+          version="${MOUSER_VERSION#v}"
+          output_dir="$RUNNER_TEMP/mouser-native-$version"
+          MOUSER_VERSION="$version" \
+          MOUSER_OUTPUT_DIR="$output_dir" \
+          MOUSER_NOTARY_PROFILE="Mouser-Notary" \
+            native/MouserNative/release.sh
+          mkdir -p native-release-assets
+          cp "$output_dir"/Mouser-*.dmg native-release-assets/
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.archive_name }}
+          name: Mouser-macOS
+          path: native-release-assets/Mouser-*.dmg
 
   build-linux:
     runs-on: ubuntu-latest
@@ -246,8 +225,7 @@ jobs:
         run: |
           mkdir -p update-assets
           cp Mouser-Windows/Mouser-Windows.zip update-assets/
-          cp Mouser-macOS/Mouser-macOS.zip update-assets/
-          cp Mouser-macOS-intel/Mouser-macOS-intel.zip update-assets/
+          cp Mouser-macOS/Mouser-*.dmg update-assets/
           cp Mouser-Linux/Mouser-Linux.zip update-assets/
           python tools/generate_update_manifest.py \
             --repo "${{ github.repository }}" \
@@ -271,8 +249,7 @@ jobs:
               --repo "${{ github.repository }}" \
               --clobber \
               Mouser-Windows/Mouser-Windows.zip \
-              Mouser-macOS/Mouser-macOS.zip \
-              Mouser-macOS-intel/Mouser-macOS-intel.zip \
+              Mouser-macOS/Mouser-*.dmg \
               Mouser-Linux/Mouser-Linux.zip \
               mouser-${{ env.RELEASE_TAG }}-update.json
           else
@@ -291,8 +268,7 @@ jobs:
               --title "Mouser ${{ env.RELEASE_TAG }}" \
               "${notes_args[@]}" \
               Mouser-Windows/Mouser-Windows.zip \
-              Mouser-macOS/Mouser-macOS.zip \
-              Mouser-macOS-intel/Mouser-macOS-intel.zip \
+              Mouser-macOS/Mouser-*.dmg \
               Mouser-Linux/Mouser-Linux.zip \
               mouser-${{ env.RELEASE_TAG }}-update.json
           fi

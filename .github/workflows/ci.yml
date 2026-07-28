@@ -50,3 +50,31 @@ jobs:
           qmllint = Path(PySide6.__file__).resolve().parent / "qmllint"
           subprocess.run([str(qmllint), *qml_files], check=True)
           PY
+
+  macos-native:
+    runs-on: [self-hosted, macOS, mouser-release]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify Xcode 27 toolchain
+        run: |
+          xcodebuild -version
+          test "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" = "27"
+
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Generate native project
+        working-directory: native/MouserNative
+        run: xcodegen generate
+
+      - name: Run Swift native tests
+        working-directory: native/MouserNative
+        run: >-
+          xcodebuild test
+          -project MouserNative.xcodeproj
+          -scheme MouserNative
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO

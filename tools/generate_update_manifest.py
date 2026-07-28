@@ -31,6 +31,18 @@ _ASSET_PLATFORM_KEYS = {
 }
 
 
+def _native_macos_dmg(asset_dir: Path) -> Path | None:
+    candidates = sorted(
+        path
+        for path in asset_dir.glob("Mouser-*.dmg")
+        if "-debug" not in path.stem.lower()
+    )
+    if len(candidates) > 1:
+        names = ", ".join(path.name for path in candidates)
+        raise SystemExit(f"Multiple release macOS DMGs found: {names}")
+    return candidates[0] if candidates else None
+
+
 def _version_from_tag(tag: str) -> str:
     return tag[1:] if tag.startswith("v") else tag
 
@@ -49,6 +61,15 @@ def build_payload(args) -> dict:
             "size": path.stat().st_size,
             "sha256": sha256_file(path),
         }
+    if native_dmg := _native_macos_dmg(asset_dir):
+        native_asset = {
+            "name": native_dmg.name,
+            "url": f"https://github.com/{args.repo}/releases/download/{args.tag}/{native_dmg.name}",
+            "size": native_dmg.stat().st_size,
+            "sha256": sha256_file(native_dmg),
+        }
+        assets["macos-arm64"] = native_asset
+        assets["macos-x86_64"] = native_asset.copy()
     if not assets:
         raise SystemExit(f"No known Mouser assets found in {asset_dir}")
     expires_at = (

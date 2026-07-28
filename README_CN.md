@@ -8,6 +8,8 @@
 
 一个轻量、开源、**完全本地运行** 的 **Logitech Options+** 替代品，用于对罗技 HID++ 鼠标进行按键 / 手势重映射。当前对 **MX Master** 与 **MX Anywhere** 系列体验最佳，并对更多罗技型号提供识别与通用回退 UI。
 
+本仓库维护于 [Linmuge/Mouser](https://github.com/Linmuge/Mouser)，fork 自 [TomBadash/Mouser](https://github.com/TomBadash/Mouser)。感谢原作者 Tom Badash 与所有上游贡献者。
+
 **零遥测，零云端，无需罗技账号。**
 
 ---
@@ -34,27 +36,23 @@
 > **无需安装。** 下载 → 解压 → 双击运行即可。
 
 <p align="center">
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-Windows.zip?style=for-the-badge&color=00d4aa&logo=windows&label=Windows&displayAssetName=false" alt="Windows Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/latest/Mouser-Windows.zip?style=for-the-badge&color=00d4aa&logo=windows&label=Windows&displayAssetName=false" alt="Windows Downloads" />
   </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-macOS.zip?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20Apple%20Silicon&displayAssetName=false" alt="macOS Apple Silicon Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Linmuge/Mouser?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20DMG" alt="macOS Release" />
   </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-macOS-intel.zip?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20Intel&displayAssetName=false" alt="macOS Intel Downloads" />
-  </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-Linux.zip?style=for-the-badge&color=00d4aa&logo=linux&label=Linux&displayAssetName=false" alt="Linux Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/latest/Mouser-Linux.zip?style=for-the-badge&color=00d4aa&logo=linux&label=Linux&displayAssetName=false" alt="Linux Downloads" />
   </a>
   <br />
-  <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/total?style=for-the-badge&color=00d4aa&label=Total%20Downloads%20(all%20versions)" alt="Downloads" />
+  <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/total?style=for-the-badge&color=00d4aa&label=Total%20Downloads%20(all%20versions)" alt="Downloads" />
 </p>
 
-1. 打开 [**最新 Release 页面**](https://github.com/TomBadash/Mouser/releases/latest)。
+1. 打开 [**最新 Release 页面**](https://github.com/Linmuge/Mouser/releases/latest)。
 2. 下载对应平台的 zip：
    - **Windows** — `Mouser-Windows.zip`
-   - **macOS（Apple Silicon）** — `Mouser-macOS.zip`
-   - **macOS（Intel）** — `Mouser-macOS-intel.zip`
+   - **macOS（通用架构）** — `Mouser-<版本>.dmg`
    - **Linux** — `Mouser-Linux.zip`
 3. 解压到任意目录（桌面、文档、`/Applications` 等均可）。
 4. 运行可执行文件：`Mouser.exe`、`Mouser.app` 或 `./Mouser`。
@@ -116,7 +114,7 @@
 ### 跨平台
 
 - **Windows、macOS、Linux** — 各平台原生 hook（`WH_MOUSE_LL`、`CGEventTap`、`evdev` + `uinput`）。
-- **macOS Intel 与 Apple Silicon 原生构建** — 分别提供 `Mouser-macOS-intel.zip` 与 `Mouser-macOS.zip`；菜单栏 App 以 `LSUIElement` 方式运行（不在 Dock 中显示）。
+- **Swift 原生 macOS App** — Apple Silicon 与 Intel 共用一个 Developer ID 签名并公证的通用 DMG，使用 SwiftUI 与 CoreHID 实现。
 - **可调窗口大小** — 主窗口默认 1060 × 700，最小 920 × 620；鼠标示意图与控件会随窗口尺寸自适应排布。
 - **开机自启** — Windows 注册表 / macOS 用户级 LaunchAgent，并提供独立的 **启动时最小化（Start minimized）** 选项，可直接启动到托盘。
 - **单实例守护** — 重复启动会将已运行的窗口置前，而不会创建第二个实例。
@@ -192,24 +190,24 @@
 
 只有在你想参与开发或运行开发版时才需要从源码构建。普通用户请直接下载 release zip — 见 [下载与运行](#下载与运行)。
 
-### 共同前置条件
+### 各平台前置条件
 
-- **Windows 10/11**、**macOS 12+（Monterey）** 或 **Linux**（X11；KDE Wayland 用于应用检测）
-- **Python 3.10+**（已在 3.14 上测试）
-- 一只支持的罗技 HID++ 鼠标（蓝牙或 USB 接收器）
-- **必须退出 Logitech Options+** — 它会与 HID++ 访问冲突
-- 已安装 `git` 与可用的构建工具链
+- **macOS：**macOS 27、Xcode 27、XcodeGen，以及支持 HID++ 的罗技鼠标。原生版使用
+  Swift 6，不需要 Python、PySide6 或 Qt。
+- **Windows / Linux：**Windows 10/11 或 Linux（X11；KDE Wayland 用于应用检测）、
+  Python 3.10+（已在 3.14 上测试），以及 `requirements.txt` 中的依赖。
+- 已安装 `git` 与对应平台可用的构建工具链。
 
 ```bash
-git clone https://github.com/TomBadash/Mouser.git
+git clone https://github.com/Linmuge/Mouser.git
 cd Mouser
-python -m venv .venv
 ```
 
 <details>
 <summary><strong>Windows</strong></summary>
 
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 
@@ -234,25 +232,16 @@ build.bat --clean        # 强制清理后重建
 <summary><strong>macOS</strong></summary>
 
 ```bash
-source .venv/bin/activate
-pip install -r requirements.txt
+cd native/MouserNative
+xcodegen generate
+open MouserNative.xcodeproj
 
-# 直接从源码运行
-python main_qml.py
-python main_qml.py --start-hidden     # 直接启动到菜单栏
-
-# 构建原生菜单栏 App Bundle
-pip install pyinstaller
-./build_macos_app.sh
+# 生成 Developer ID 签名并公证的通用 Release / Debug DMG
+./release.sh
 ```
 
-输出为 `dist/Mouser.app`。脚本优先使用 `images/AppIcon.icns`；若不存在，则从 `images/logo_icon.png` 生成 `.icns`。签名方式取决于是否设置了 `MOUSER_SIGN_IDENTITY`：
+macOS App 使用 Swift 6、SwiftUI、CoreHID 与最新 macOS 27 API，不再打包 Python、PySide6 或 Qt。`release.sh` 会生成通用架构的 `Mouser-<版本>.dmg` 与 `Mouser-<版本>-debug.dmg`，用 Developer ID 签名，通过钥匙串 `Mouser-Notary` 配置提交公证，装订票据并完成 Gatekeeper 校验。详见 [`native/MouserNative/README.md`](native/MouserNative/README.md)。
 
-- **未设置（默认）**：使用 `codesign --sign -` 进行 ad-hoc 签名，适合一次性本地构建，但每次重建都可能改变 bundle 的代码身份，因此 macOS 可能要求重新授予辅助功能权限。
-- **设置为代码签名身份**（可用 `security find-identity -v -p codesigning` 查看，推荐使用 SHA-1 形式）：会使用 hardened runtime 选项签名每个嵌套 `.dylib` / `.so` / `.framework`，然后用 `build_resources/Mouser.entitlements` 中的 hardened-runtime 例外权限签名外层 app。这是面向本地重复构建的开发者签名路径；稳定的 macOS 权限行为依赖相同源码、解析出的 Python 解释器、依赖版本、目标架构、签名身份、entitlements 和 timestamp 策略。
-- 这**不是** notarized 发布签名流程。公开 macOS release zip 仍保持 ad-hoc 签名，直到未来单独加入 Developer ID 签名、安全 timestamp、notarization、stapling 和 Gatekeeper 校验流程。
-- 构建时使用与目标架构一致的 Python：`arm64` Python 产出 Apple Silicon Bundle，`x86_64` Python 产出 Intel Bundle。可设置 `PYINSTALLER_TARGET_ARCH=arm64|x86_64|universal2` 来覆盖。
-- 推送 tag 后，Release CI 会自动同时发布 `Mouser-macOS.zip`（Apple Silicon）与 `Mouser-macOS-intel.zip`（Intel）。
 - 需要授予辅助功能（Accessibility）权限。完整步骤与平台差异请见 [readme_mac_osx.md](readme_mac_osx.md)。
 
 </details>
@@ -261,6 +250,7 @@ pip install pyinstaller
 <summary><strong>Linux</strong></summary>
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -284,7 +274,9 @@ pyinstaller Mouser-linux.spec --noconfirm
 
 > **自动化发布：** 推送 `v*` 标签会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)，CI 会构建 Windows、macOS（Apple Silicon + Intel）、Linux 产物，并上传到对应的 GitHub Release。
 
-项目结构、架构图、HID++ 手势检测、引擎与重连流程、调试用 CLI 选项（`--hid-backend=iokit|hidapi|auto`）、运行测试套件等开发者文档，请见 [DEVELOPMENT.md](DEVELOPMENT.md)（英文）。要新增设备支持，请见 [CONTRIBUTING_DEVICES.md](CONTRIBUTING_DEVICES.md)。
+项目结构、两套平台架构、原生 HID++ 恢复、Python 兼容层调试选项与测试命令，
+请见 [DEVELOPMENT.md](DEVELOPMENT.md)（英文）。要新增设备支持，请见
+[CONTRIBUTING_DEVICES.md](CONTRIBUTING_DEVICES.md)。
 
 ---
 

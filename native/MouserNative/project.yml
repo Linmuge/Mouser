@@ -1,0 +1,71 @@
+name: MouserNative
+
+options:
+  bundleIdPrefix: io.github.tombadash
+  deploymentTarget:
+    macOS: "27.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: 3.8.0
+    CURRENT_PROJECT_VERSION: 1
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_ALLOWED: NO
+
+targets:
+  MouserNative:
+    type: application
+    platform: macOS
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Mouser
+        CFBundleIconFile: AppIcon.icns
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: Forked from TomBadash/Mouser
+    sources:
+      - Sources
+      - path: Resources
+        buildPhase: resources
+      - path: ../../images/AppIcon.icns
+        buildPhase: resources
+      - path: ../../images/mouse_mx_anywhere_3s.png
+        buildPhase: resources
+      - path: ../../images/mx_vertical.png
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Mouser
+        PRODUCT_MODULE_NAME: MouserNative
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.tombadash.mouser
+
+  MouserNativeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests
+    dependencies:
+      - target: MouserNative
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Mouser.app/Contents/MacOS/Mouser"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  MouserNative:
+    build:
+      targets:
+        MouserNative: all
+        MouserNativeTests: [test]
+    test:
+      targets:
+        - MouserNativeTests

@@ -1,0 +1,662 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0056A0C9A5C6DD107B91450D /* HIDPPProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83AA0C4F663CCD6FD997641 /* HIDPPProtocolTests.swift */; };
+		021AACD48E0706063C5C17B2 /* MouseButtonEventRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34574080913492C5BBD04044 /* MouseButtonEventRouter.swift */; };
+		038DEDAB02E0F5E921F98D5E /* MacScreenshotCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E3B862BE9B8B0EDEFE3347 /* MacScreenshotCaptureService.swift */; };
+		05B0086FB0CDA56DE8CFBE83 /* CoreGraphicsScrollEventTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17F488E10DAEAB88F03CB808 /* CoreGraphicsScrollEventTap.swift */; };
+		0669EE7B798294B047292924 /* DiagnosticEventLogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F6E2C5264721CFDBC67937B /* DiagnosticEventLogTests.swift */; };
+		0769D5A083BBB1DF889367E8 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DA225929E9E518E77FF3492 /* OverviewView.swift */; };
+		0AB6C251801056EF5448C4A1 /* MouseButtonEventRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 396892654545552ACB4133A5 /* MouseButtonEventRouterTests.swift */; };
+		1526753B89C939BA3507502A /* GestureRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5746A11357653CC0FD16A618 /* GestureRecognizerTests.swift */; };
+		1B24F35C40FCEBF4EBD0DF81 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3291E9AB86B6C1ABDC7CA528 /* DesignSystem.swift */; };
+		1DB910FC19A5D6A54D763B6B /* LoginItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0193BD2E232A78A734827258 /* LoginItemController.swift */; };
+		1E09ACC7993952C7895DA95B /* MacScreenshotCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39B7A8F084E9D3A7DD10CC12 /* MacScreenshotCaptureTests.swift */; };
+		21267ACA9C1F0BD62D388B84 /* MouserNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF136E861CF8BE646F7584F /* MouserNativeApp.swift */; };
+		286AC9B33B0917D3AC021694 /* ButtonsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98BB1172DEE48F34F9BF7049 /* ButtonsView.swift */; };
+		2C3A4EF0AE5E86373B2ED8D2 /* MacActionExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D198CCD50DF85F154DF30BC /* MacActionExecutorTests.swift */; };
+		3337B81D6DB3652528BDE9DA /* mx-master-3s.png in Resources */ = {isa = PBXBuildFile; fileRef = 6B6508A93CB218811ACE5F99 /* mx-master-3s.png */; };
+		3482D5646B43B9835522A22B /* ActionsRingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1334D25CE15654913D0B6EEC /* ActionsRingOverlay.swift */; };
+		3838CF4BB21B15D40A5E26E5 /* HIDPPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FFE8B8C30DA3F591037837 /* HIDPPProtocol.swift */; };
+		3D9115A59FE08809767C6E08 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45A24CB44257506AD573470F /* ContentView.swift */; };
+		46BE747A4084D70AE7752EA3 /* AccessibilityAuthorizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266C4E066DE7D66DD25B9355 /* AccessibilityAuthorizationTests.swift */; };
+		74DB4C9F7FA8BF0AE92D62A9 /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60FE86CC809D8B17E621A04 /* UpdateService.swift */; };
+		760911D6742454CB0188A54D /* HIDPPSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E0401CCD21988E6B515D213 /* HIDPPSessionTests.swift */; };
+		77803C046C0DA211E0CD9A04 /* AccessibilityAuthorization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4918C47AF39A07A1FC0EFCCE /* AccessibilityAuthorization.swift */; };
+		7DC65214C22134D64C3C82B0 /* LoginItemControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F33C0EC7982F4F38B22B9C2 /* LoginItemControllerTests.swift */; };
+		7E626A7C7BD5031B9F633566 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = D1017F31C4D137BC954C593B /* AppIcon.icns */; };
+		83AEA03C0062211C9EAE5BA7 /* MouserConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426CFB45067B7AA9F23FE730 /* MouserConfigStore.swift */; };
+		887EB4B62A445381BB73B3BA /* HIDPPDeviceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABA696EC0FC2139F70C612F6 /* HIDPPDeviceControllerTests.swift */; };
+		974D8C3023CAE3E34B9459EF /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 981ABA13CB1CFFBEA73C9356 /* SettingsViews.swift */; };
+		9B3A1518E6A25F592238A5EB /* IOKitHIDReportTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C6B921262B6D750C60B49C /* IOKitHIDReportTransport.swift */; };
+		9BB52B572BCD56451D0B9DAC /* HIDReportNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D20A215BBC7784FA75DB17 /* HIDReportNormalizer.swift */; };
+		9C21E49624E831024AE739C6 /* LogitechDeviceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D6E9F82E39CF21E144C0458 /* LogitechDeviceCatalog.swift */; };
+		A0FD3D36181FECA8A7BE95F0 /* HIDPPButtonEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8520F0BBA7926707FB8108F /* HIDPPButtonEvents.swift */; };
+		A2894C53312D5C6A3162A39E /* UpdateServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2141DC6F660D08602AC502B9 /* UpdateServiceTests.swift */; };
+		B4FC83B37E582CE4E07C43C5 /* SessionRecoveryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */; };
+		B5C040D34DC4A270B971EF5B /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A343B759D6721A35FFB50535 /* SidebarView.swift */; };
+		B7694479813567F7E387AA41 /* GestureRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5434136E2EB2DA301B4960D0 /* GestureRecognizer.swift */; };
+		C0D41CCEAC41E5CBEFA8F326 /* WorkspaceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 451938A77A4035BA38EAF2B0 /* WorkspaceModelTests.swift */; };
+		C1D366F1012A8C638BE23C67 /* LogitechDeviceCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1F6A0DD118A7C976947DD8 /* LogitechDeviceCatalogTests.swift */; };
+		C2B06EBEB6E112180059358F /* MacActionExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D5A5E3A0D518D781D788743 /* MacActionExecutor.swift */; };
+		C306B64C1C73EB5B998EC55D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 06967B6FA32D786205904658 /* Localizable.strings */; };
+		C40BFF180FA74F82C29A4020 /* HIDPPSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40C00C43E8C0985B1201538 /* HIDPPSession.swift */; };
+		CEB049E8FDFFBE4B0F97BEB8 /* LogitechDeviceDiscoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 020E1C718AEAABA4B9AFC840 /* LogitechDeviceDiscoveryTests.swift */; };
+		D2B5F49478F5E3C52B6A2364 /* HIDPPButtonEventRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4FE3DA9253EE1DC84B9C7E9 /* HIDPPButtonEventRouterTests.swift */; };
+		D3CA717AD6ACA55E18C9C7D5 /* ApplicationBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6385FC426B042B5570467833 /* ApplicationBundleTests.swift */; };
+		DA1F29298E68346A09AA79F3 /* ScrollEventPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C45208049DEC4505482E6D /* ScrollEventPipeline.swift */; };
+		DDC9F81C7AE7EFABFC1AD1CE /* MouserConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */; };
+		E09E78D9063C5533182962A9 /* mouse_mx_anywhere_3s.png in Resources */ = {isa = PBXBuildFile; fileRef = 944FD866D487D2AB1670A265 /* mouse_mx_anywhere_3s.png */; };
+		E1B739C8CC43D521C6618DA1 /* WorkspaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2539B7ACCD82E32EB150DD01 /* WorkspaceModel.swift */; };
+		E23849D0C96E1E09C2569CDA /* HIDPPDeviceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB23FFE60FE63161A507D5DC /* HIDPPDeviceController.swift */; };
+		E29A069272BF503E6E057637 /* mx_vertical.png in Resources */ = {isa = PBXBuildFile; fileRef = 5DEFE78E01431D568C545662 /* mx_vertical.png */; };
+		EED94D402D886FE5E98C5F3B /* DiagnosticEventLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40F1FFEF5C77FFBECE0D48E0 /* DiagnosticEventLog.swift */; };
+		F494B8B9661567A350363BE2 /* ScrollEventPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 687A443D78C4C4DE47274C65 /* ScrollEventPipelineTests.swift */; };
+		FC51C09C2EC71185A4EC62D9 /* LogitechDeviceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78C771281DD94EECBB979BDC /* LogitechDeviceDiscovery.swift */; };
+		FD4BE9F2528B5B9AAB58B0B3 /* ApplicationProfileCandidate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4865835043B0B8F5ED864394 /* ApplicationProfileCandidate.swift */; };
+		FFA1C83BE31E73EA57F639AF /* MacNativeUpdateInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F653657D814BC5584854413 /* MacNativeUpdateInstaller.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		24E2BCCEB6B97102BF4E6297 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DB72C4A7120F5939D9D9F333 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D8766C67AB0D1582A2D5B55E;
+			remoteInfo = MouserNative;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0193BD2E232A78A734827258 /* LoginItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemController.swift; sourceTree = "<group>"; };
+		020E1C718AEAABA4B9AFC840 /* LogitechDeviceDiscoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechDeviceDiscoveryTests.swift; sourceTree = "<group>"; };
+		0DA225929E9E518E77FF3492 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		0F33C0EC7982F4F38B22B9C2 /* LoginItemControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemControllerTests.swift; sourceTree = "<group>"; };
+		1334D25CE15654913D0B6EEC /* ActionsRingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionsRingOverlay.swift; sourceTree = "<group>"; };
+		17F488E10DAEAB88F03CB808 /* CoreGraphicsScrollEventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreGraphicsScrollEventTap.swift; sourceTree = "<group>"; };
+		1B1F6A0DD118A7C976947DD8 /* LogitechDeviceCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechDeviceCatalogTests.swift; sourceTree = "<group>"; };
+		1F71C1CC44970E4E22BE5AEF /* MouserNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MouserNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2141DC6F660D08602AC502B9 /* UpdateServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateServiceTests.swift; sourceTree = "<group>"; };
+		2539B7ACCD82E32EB150DD01 /* WorkspaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModel.swift; sourceTree = "<group>"; };
+		266C4E066DE7D66DD25B9355 /* AccessibilityAuthorizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityAuthorizationTests.swift; sourceTree = "<group>"; };
+		2E0401CCD21988E6B515D213 /* HIDPPSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPSessionTests.swift; sourceTree = "<group>"; };
+		3291E9AB86B6C1ABDC7CA528 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		34574080913492C5BBD04044 /* MouseButtonEventRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseButtonEventRouter.swift; sourceTree = "<group>"; };
+		396892654545552ACB4133A5 /* MouseButtonEventRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseButtonEventRouterTests.swift; sourceTree = "<group>"; };
+		39B7A8F084E9D3A7DD10CC12 /* MacScreenshotCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScreenshotCaptureTests.swift; sourceTree = "<group>"; };
+		3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecoveryMonitor.swift; sourceTree = "<group>"; };
+		40F1FFEF5C77FFBECE0D48E0 /* DiagnosticEventLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticEventLog.swift; sourceTree = "<group>"; };
+		426CFB45067B7AA9F23FE730 /* MouserConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouserConfigStore.swift; sourceTree = "<group>"; };
+		451938A77A4035BA38EAF2B0 /* WorkspaceModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceModelTests.swift; sourceTree = "<group>"; };
+		45A24CB44257506AD573470F /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		4865835043B0B8F5ED864394 /* ApplicationProfileCandidate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationProfileCandidate.swift; sourceTree = "<group>"; };
+		4918C47AF39A07A1FC0EFCCE /* AccessibilityAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityAuthorization.swift; sourceTree = "<group>"; };
+		4F653657D814BC5584854413 /* MacNativeUpdateInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacNativeUpdateInstaller.swift; sourceTree = "<group>"; };
+		4F6E2C5264721CFDBC67937B /* DiagnosticEventLogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticEventLogTests.swift; sourceTree = "<group>"; };
+		53FFE8B8C30DA3F591037837 /* HIDPPProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPProtocol.swift; sourceTree = "<group>"; };
+		5434136E2EB2DA301B4960D0 /* GestureRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureRecognizer.swift; sourceTree = "<group>"; };
+		5746A11357653CC0FD16A618 /* GestureRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureRecognizerTests.swift; sourceTree = "<group>"; };
+		5DEFE78E01431D568C545662 /* mx_vertical.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mx_vertical.png; sourceTree = "<group>"; };
+		6385FC426B042B5570467833 /* ApplicationBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationBundleTests.swift; sourceTree = "<group>"; };
+		687A443D78C4C4DE47274C65 /* ScrollEventPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollEventPipelineTests.swift; sourceTree = "<group>"; };
+		6B6508A93CB218811ACE5F99 /* mx-master-3s.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "mx-master-3s.png"; sourceTree = "<group>"; };
+		6D5A5E3A0D518D781D788743 /* MacActionExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacActionExecutor.swift; sourceTree = "<group>"; };
+		6D6E9F82E39CF21E144C0458 /* LogitechDeviceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechDeviceCatalog.swift; sourceTree = "<group>"; };
+		78C771281DD94EECBB979BDC /* LogitechDeviceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechDeviceDiscovery.swift; sourceTree = "<group>"; };
+		7D198CCD50DF85F154DF30BC /* MacActionExecutorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacActionExecutorTests.swift; sourceTree = "<group>"; };
+		944FD866D487D2AB1670A265 /* mouse_mx_anywhere_3s.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mouse_mx_anywhere_3s.png; sourceTree = "<group>"; };
+		981ABA13CB1CFFBEA73C9356 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
+		98BB1172DEE48F34F9BF7049 /* ButtonsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ButtonsView.swift; sourceTree = "<group>"; };
+		A343B759D6721A35FFB50535 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouserConfigStoreTests.swift; sourceTree = "<group>"; };
+		ABA696EC0FC2139F70C612F6 /* HIDPPDeviceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPDeviceControllerTests.swift; sourceTree = "<group>"; };
+		B40C00C43E8C0985B1201538 /* HIDPPSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPSession.swift; sourceTree = "<group>"; };
+		B4FE3DA9253EE1DC84B9C7E9 /* HIDPPButtonEventRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPButtonEventRouterTests.swift; sourceTree = "<group>"; };
+		B5D20A215BBC7784FA75DB17 /* HIDReportNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDReportNormalizer.swift; sourceTree = "<group>"; };
+		B8C45208049DEC4505482E6D /* ScrollEventPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollEventPipeline.swift; sourceTree = "<group>"; };
+		BB23FFE60FE63161A507D5DC /* HIDPPDeviceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPDeviceController.swift; sourceTree = "<group>"; };
+		C30AE3ADC5BFC37E9F854E9B /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		C4D4346B14DAC4B8EC6BE8F4 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		CA523D8F51CAFE8723C8AE25 /* MouserNativeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MouserNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D1017F31C4D137BC954C593B /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
+		D4C6B921262B6D750C60B49C /* IOKitHIDReportTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOKitHIDReportTransport.swift; sourceTree = "<group>"; };
+		E60FE86CC809D8B17E621A04 /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
+		E6E3B862BE9B8B0EDEFE3347 /* MacScreenshotCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacScreenshotCaptureService.swift; sourceTree = "<group>"; };
+		E83AA0C4F663CCD6FD997641 /* HIDPPProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPProtocolTests.swift; sourceTree = "<group>"; };
+		E8520F0BBA7926707FB8108F /* HIDPPButtonEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HIDPPButtonEvents.swift; sourceTree = "<group>"; };
+		EDF136E861CF8BE646F7584F /* MouserNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouserNativeApp.swift; sourceTree = "<group>"; };
+		F8A23A855EA34097F9F87437 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/Localizable.strings"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		144DC79C0F7294194AB435C8 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				266C4E066DE7D66DD25B9355 /* AccessibilityAuthorizationTests.swift */,
+				6385FC426B042B5570467833 /* ApplicationBundleTests.swift */,
+				4F6E2C5264721CFDBC67937B /* DiagnosticEventLogTests.swift */,
+				5746A11357653CC0FD16A618 /* GestureRecognizerTests.swift */,
+				B4FE3DA9253EE1DC84B9C7E9 /* HIDPPButtonEventRouterTests.swift */,
+				ABA696EC0FC2139F70C612F6 /* HIDPPDeviceControllerTests.swift */,
+				E83AA0C4F663CCD6FD997641 /* HIDPPProtocolTests.swift */,
+				2E0401CCD21988E6B515D213 /* HIDPPSessionTests.swift */,
+				0F33C0EC7982F4F38B22B9C2 /* LoginItemControllerTests.swift */,
+				1B1F6A0DD118A7C976947DD8 /* LogitechDeviceCatalogTests.swift */,
+				020E1C718AEAABA4B9AFC840 /* LogitechDeviceDiscoveryTests.swift */,
+				7D198CCD50DF85F154DF30BC /* MacActionExecutorTests.swift */,
+				39B7A8F084E9D3A7DD10CC12 /* MacScreenshotCaptureTests.swift */,
+				396892654545552ACB4133A5 /* MouseButtonEventRouterTests.swift */,
+				A4CC533E0A6951674CD0D973 /* MouserConfigStoreTests.swift */,
+				687A443D78C4C4DE47274C65 /* ScrollEventPipelineTests.swift */,
+				2141DC6F660D08602AC502B9 /* UpdateServiceTests.swift */,
+				451938A77A4035BA38EAF2B0 /* WorkspaceModelTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		4DA2961478808432B2DB3361 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				4918C47AF39A07A1FC0EFCCE /* AccessibilityAuthorization.swift */,
+				1334D25CE15654913D0B6EEC /* ActionsRingOverlay.swift */,
+				4865835043B0B8F5ED864394 /* ApplicationProfileCandidate.swift */,
+				98BB1172DEE48F34F9BF7049 /* ButtonsView.swift */,
+				45A24CB44257506AD573470F /* ContentView.swift */,
+				17F488E10DAEAB88F03CB808 /* CoreGraphicsScrollEventTap.swift */,
+				3291E9AB86B6C1ABDC7CA528 /* DesignSystem.swift */,
+				40F1FFEF5C77FFBECE0D48E0 /* DiagnosticEventLog.swift */,
+				5434136E2EB2DA301B4960D0 /* GestureRecognizer.swift */,
+				E8520F0BBA7926707FB8108F /* HIDPPButtonEvents.swift */,
+				BB23FFE60FE63161A507D5DC /* HIDPPDeviceController.swift */,
+				53FFE8B8C30DA3F591037837 /* HIDPPProtocol.swift */,
+				B40C00C43E8C0985B1201538 /* HIDPPSession.swift */,
+				B5D20A215BBC7784FA75DB17 /* HIDReportNormalizer.swift */,
+				D4C6B921262B6D750C60B49C /* IOKitHIDReportTransport.swift */,
+				0193BD2E232A78A734827258 /* LoginItemController.swift */,
+				6D6E9F82E39CF21E144C0458 /* LogitechDeviceCatalog.swift */,
+				78C771281DD94EECBB979BDC /* LogitechDeviceDiscovery.swift */,
+				6D5A5E3A0D518D781D788743 /* MacActionExecutor.swift */,
+				4F653657D814BC5584854413 /* MacNativeUpdateInstaller.swift */,
+				E6E3B862BE9B8B0EDEFE3347 /* MacScreenshotCaptureService.swift */,
+				34574080913492C5BBD04044 /* MouseButtonEventRouter.swift */,
+				426CFB45067B7AA9F23FE730 /* MouserConfigStore.swift */,
+				EDF136E861CF8BE646F7584F /* MouserNativeApp.swift */,
+				0DA225929E9E518E77FF3492 /* OverviewView.swift */,
+				B8C45208049DEC4505482E6D /* ScrollEventPipeline.swift */,
+				3BEB1169DD7325EBA8939CF6 /* SessionRecoveryMonitor.swift */,
+				981ABA13CB1CFFBEA73C9356 /* SettingsViews.swift */,
+				A343B759D6721A35FFB50535 /* SidebarView.swift */,
+				E60FE86CC809D8B17E621A04 /* UpdateService.swift */,
+				2539B7ACCD82E32EB150DD01 /* WorkspaceModel.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		70015D70CB2348A7F0F15488 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1F71C1CC44970E4E22BE5AEF /* MouserNative.app */,
+				CA523D8F51CAFE8723C8AE25 /* MouserNativeTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		756333E8F424E53C5397A479 /* images */ = {
+			isa = PBXGroup;
+			children = (
+				D1017F31C4D137BC954C593B /* AppIcon.icns */,
+				944FD866D487D2AB1670A265 /* mouse_mx_anywhere_3s.png */,
+				5DEFE78E01431D568C545662 /* mx_vertical.png */,
+			);
+			path = images;
+			sourceTree = "<group>";
+		};
+		7BC64E7630C8178FAD878790 /* Mouser */ = {
+			isa = PBXGroup;
+			children = (
+				756333E8F424E53C5397A479 /* images */,
+			);
+			name = Mouser;
+			path = ../..;
+			sourceTree = "<group>";
+		};
+		D60E3760632D7DE977884364 = {
+			isa = PBXGroup;
+			children = (
+				7BC64E7630C8178FAD878790 /* Mouser */,
+				D79CDD478EF8300E80572E71 /* Resources */,
+				4DA2961478808432B2DB3361 /* Sources */,
+				144DC79C0F7294194AB435C8 /* Tests */,
+				70015D70CB2348A7F0F15488 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D79CDD478EF8300E80572E71 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				6B6508A93CB218811ACE5F99 /* mx-master-3s.png */,
+				06967B6FA32D786205904658 /* Localizable.strings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6ACE47AEDD9175163F541361 /* MouserNativeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 72D189CF8E0B5446064373B1 /* Build configuration list for PBXNativeTarget "MouserNativeTests" */;
+			buildPhases = (
+				C0BF5291443C47D65B30B5A2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CBB5D0C57947B878D79DEB84 /* PBXTargetDependency */,
+			);
+			name = MouserNativeTests;
+			packageProductDependencies = (
+			);
+			productName = MouserNativeTests;
+			productReference = CA523D8F51CAFE8723C8AE25 /* MouserNativeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D8766C67AB0D1582A2D5B55E /* MouserNative */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 777395600A409AA6F9454C37 /* Build configuration list for PBXNativeTarget "MouserNative" */;
+			buildPhases = (
+				B0CF61634F8DEEFE1A2CF642 /* Sources */,
+				3700F2CC172F8DCC809DFAAA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MouserNative;
+			packageProductDependencies = (
+			);
+			productName = MouserNative;
+			productReference = 1F71C1CC44970E4E22BE5AEF /* MouserNative.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DB72C4A7120F5939D9D9F333 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					6ACE47AEDD9175163F541361 = {
+						DevelopmentTeam = "";
+					};
+					D8766C67AB0D1582A2D5B55E = {
+						DevelopmentTeam = "";
+					};
+				};
+			};
+			buildConfigurationList = B17D777C236899D837C6CC0E /* Build configuration list for PBXProject "MouserNative" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				"zh-Hans",
+				"zh-Hant",
+			);
+			mainGroup = D60E3760632D7DE977884364;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 70015D70CB2348A7F0F15488 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D8766C67AB0D1582A2D5B55E /* MouserNative */,
+				6ACE47AEDD9175163F541361 /* MouserNativeTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3700F2CC172F8DCC809DFAAA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7E626A7C7BD5031B9F633566 /* AppIcon.icns in Resources */,
+				C306B64C1C73EB5B998EC55D /* Localizable.strings in Resources */,
+				E09E78D9063C5533182962A9 /* mouse_mx_anywhere_3s.png in Resources */,
+				3337B81D6DB3652528BDE9DA /* mx-master-3s.png in Resources */,
+				E29A069272BF503E6E057637 /* mx_vertical.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B0CF61634F8DEEFE1A2CF642 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				77803C046C0DA211E0CD9A04 /* AccessibilityAuthorization.swift in Sources */,
+				3482D5646B43B9835522A22B /* ActionsRingOverlay.swift in Sources */,
+				FD4BE9F2528B5B9AAB58B0B3 /* ApplicationProfileCandidate.swift in Sources */,
+				286AC9B33B0917D3AC021694 /* ButtonsView.swift in Sources */,
+				3D9115A59FE08809767C6E08 /* ContentView.swift in Sources */,
+				05B0086FB0CDA56DE8CFBE83 /* CoreGraphicsScrollEventTap.swift in Sources */,
+				1B24F35C40FCEBF4EBD0DF81 /* DesignSystem.swift in Sources */,
+				EED94D402D886FE5E98C5F3B /* DiagnosticEventLog.swift in Sources */,
+				B7694479813567F7E387AA41 /* GestureRecognizer.swift in Sources */,
+				A0FD3D36181FECA8A7BE95F0 /* HIDPPButtonEvents.swift in Sources */,
+				E23849D0C96E1E09C2569CDA /* HIDPPDeviceController.swift in Sources */,
+				3838CF4BB21B15D40A5E26E5 /* HIDPPProtocol.swift in Sources */,
+				C40BFF180FA74F82C29A4020 /* HIDPPSession.swift in Sources */,
+				9BB52B572BCD56451D0B9DAC /* HIDReportNormalizer.swift in Sources */,
+				9B3A1518E6A25F592238A5EB /* IOKitHIDReportTransport.swift in Sources */,
+				1DB910FC19A5D6A54D763B6B /* LoginItemController.swift in Sources */,
+				9C21E49624E831024AE739C6 /* LogitechDeviceCatalog.swift in Sources */,
+				FC51C09C2EC71185A4EC62D9 /* LogitechDeviceDiscovery.swift in Sources */,
+				C2B06EBEB6E112180059358F /* MacActionExecutor.swift in Sources */,
+				FFA1C83BE31E73EA57F639AF /* MacNativeUpdateInstaller.swift in Sources */,
+				038DEDAB02E0F5E921F98D5E /* MacScreenshotCaptureService.swift in Sources */,
+				021AACD48E0706063C5C17B2 /* MouseButtonEventRouter.swift in Sources */,
+				83AEA03C0062211C9EAE5BA7 /* MouserConfigStore.swift in Sources */,
+				21267ACA9C1F0BD62D388B84 /* MouserNativeApp.swift in Sources */,
+				0769D5A083BBB1DF889367E8 /* OverviewView.swift in Sources */,
+				DA1F29298E68346A09AA79F3 /* ScrollEventPipeline.swift in Sources */,
+				B4FC83B37E582CE4E07C43C5 /* SessionRecoveryMonitor.swift in Sources */,
+				974D8C3023CAE3E34B9459EF /* SettingsViews.swift in Sources */,
+				B5C040D34DC4A270B971EF5B /* SidebarView.swift in Sources */,
+				74DB4C9F7FA8BF0AE92D62A9 /* UpdateService.swift in Sources */,
+				E1B739C8CC43D521C6618DA1 /* WorkspaceModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C0BF5291443C47D65B30B5A2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				46BE747A4084D70AE7752EA3 /* AccessibilityAuthorizationTests.swift in Sources */,
+				D3CA717AD6ACA55E18C9C7D5 /* ApplicationBundleTests.swift in Sources */,
+				0669EE7B798294B047292924 /* DiagnosticEventLogTests.swift in Sources */,
+				1526753B89C939BA3507502A /* GestureRecognizerTests.swift in Sources */,
+				D2B5F49478F5E3C52B6A2364 /* HIDPPButtonEventRouterTests.swift in Sources */,
+				887EB4B62A445381BB73B3BA /* HIDPPDeviceControllerTests.swift in Sources */,
+				0056A0C9A5C6DD107B91450D /* HIDPPProtocolTests.swift in Sources */,
+				760911D6742454CB0188A54D /* HIDPPSessionTests.swift in Sources */,
+				7DC65214C22134D64C3C82B0 /* LoginItemControllerTests.swift in Sources */,
+				C1D366F1012A8C638BE23C67 /* LogitechDeviceCatalogTests.swift in Sources */,
+				CEB049E8FDFFBE4B0F97BEB8 /* LogitechDeviceDiscoveryTests.swift in Sources */,
+				2C3A4EF0AE5E86373B2ED8D2 /* MacActionExecutorTests.swift in Sources */,
+				1E09ACC7993952C7895DA95B /* MacScreenshotCaptureTests.swift in Sources */,
+				0AB6C251801056EF5448C4A1 /* MouseButtonEventRouterTests.swift in Sources */,
+				DDC9F81C7AE7EFABFC1AD1CE /* MouserConfigStoreTests.swift in Sources */,
+				F494B8B9661567A350363BE2 /* ScrollEventPipelineTests.swift in Sources */,
+				A2894C53312D5C6A3162A39E /* UpdateServiceTests.swift in Sources */,
+				C0D41CCEAC41E5CBEFA8F326 /* WorkspaceModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CBB5D0C57947B878D79DEB84 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D8766C67AB0D1582A2D5B55E /* MouserNative */;
+			targetProxy = 24E2BCCEB6B97102BF4E6297 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		06967B6FA32D786205904658 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				C30AE3ADC5BFC37E9F854E9B /* en */,
+				C4D4346B14DAC4B8EC6BE8F4 /* zh-Hans */,
+				F8A23A855EA34097F9F87437 /* zh-Hant */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		2A116FCBC102A6A8E2D9506C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.8.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		45DF4B28552DBD5F4A48D69B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.tombadash.MouserNativeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mouser.app/Contents/MacOS/Mouser";
+			};
+			name = Debug;
+		};
+		498549B0125F17D0B685DDEA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.8.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		B5EA182740ACBD59160D3F45 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.tombadash.mouser;
+				PRODUCT_MODULE_NAME = MouserNative;
+				PRODUCT_NAME = Mouser;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		CF70CD637F3896D6B6A33B79 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.tombadash.mouser;
+				PRODUCT_MODULE_NAME = MouserNative;
+				PRODUCT_NAME = Mouser;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		E1AC7CE81C18BD0D516C28A0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.tombadash.MouserNativeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mouser.app/Contents/MacOS/Mouser";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		72D189CF8E0B5446064373B1 /* Build configuration list for PBXNativeTarget "MouserNativeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				45DF4B28552DBD5F4A48D69B /* Debug */,
+				E1AC7CE81C18BD0D516C28A0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		777395600A409AA6F9454C37 /* Build configuration list for PBXNativeTarget "MouserNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CF70CD637F3896D6B6A33B79 /* Debug */,
+				B5EA182740ACBD59160D3F45 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B17D777C236899D837C6CC0E /* Build configuration list for PBXProject "MouserNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2A116FCBC102A6A8E2D9506C /* Debug */,
+				498549B0125F17D0B685DDEA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = DB72C4A7120F5939D9D9F333 /* Project object */;
+}

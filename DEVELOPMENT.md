@@ -6,7 +6,7 @@ This document contains the technical details a developer needs to navigate Mouse
 
 - [Development setup](#development-setup)
 - [Architecture](#architecture)
-- [Entry point: `main_qml.py`](#entry-point-main_qmlpy)
+- [Python entry point (Windows/Linux)](#python-entry-point-windowslinux-main_qmlpy)
 - [How it works](#how-it-works)
   - [Mouse hook](#mouse-hook)
   - [Device catalog & layout registry](#device-catalog--layout-registry)
@@ -24,7 +24,10 @@ This document contains the technical details a developer needs to navigate Mouse
 
 ## Development setup
 
-Install the project dependencies before running the app or test suite. Do not rely on the system Python unless it already has the requirements installed.
+Mouser has two platform implementations. macOS uses the Swift 6 / SwiftUI target in
+`native/MouserNative`; Windows and Linux keep the Python/PySide6 implementation.
+
+For Windows/Linux, install the Python dependencies before running the app or test suite:
 
 ```bash
 python3 -m venv .venv
@@ -32,33 +35,39 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-On macOS, `requirements.txt` installs PyObjC (`objc`, Quartz, and AppKit bindings), which Mouser needs for CGEventTap, app detection, and key simulation.
-
 Run the test suite from the activated environment:
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-## Entry Point: `main_qml.py`
+For macOS, install Xcode 27 and XcodeGen, then generate and test the native project:
 
-`main_qml.py` is the primary launch script for Mouser, bringing together the core processing logic (Engine) and the graphical user interface (QML Backend). It replaces an older `tkinter`-based interface.
+```bash
+cd native/MouserNative
+xcodegen generate
+xcodebuild test -project MouserNative.xcodeproj -scheme MouserNative -destination 'platform=macOS'
+```
+
+## Python entry point (Windows/Linux): `main_qml.py`
+
+`main_qml.py` is the Windows/Linux launch script, bringing together the core processing
+logic (Engine) and the QML backend. It is retained for those platforms and is not used by
+the native macOS application.
 
 ### What the Code is Responsible For
 
-- **Environment Setup:** Defines absolute paths to handle both dev environments and frozen PyInstaller executables (`.app` bundles on macOS, `_internal` on Windows).
+- **Environment Setup:** Defines absolute paths for development and frozen PyInstaller executables.
 - **App Initialization:** Creates the `QApplication` and configures the Qt Material theme.
 - **Engine Bootstrapping:** Initializes the core HID (Human Interface Device) engine and the UI backend.
 - **QML Loading:** Registers context properties and image providers, then loads `Main.qml`.
-- **System Integration:** Sets up the OS system tray / menu-bar icon, checks macOS accessibility permissions, syncs login-item state, and binds system-wide dark/light mode states.
+- **System Integration:** Sets up the platform tray icon, startup state, and dark/light appearance.
 
 ### Key Classes and Functions
 
 - `main()`: The main entry point. Orchestrates the startup sequence, initializes the `Engine` and `Backend`, loads the QML files, exposes Python objects to QML, creates the system tray, and starts the Qt event loop (`app.exec()`).
 - `UiState(QObject)`: A bridge class that tracks the OS's system appearance (Dark vs. Light mode) and exposes it to the QML frontend via Qt Properties and Signals.
-- `_check_accessibility()`: A macOS-specific function that checks (and prompts) the user for Accessibility Permissions. This is crucial for intercepting or simulating mouse/keyboard events on Mac.
-- `core/accessibility.py`: Centralizes the native macOS trust check used by both startup and backend-exposed state.
-- `core/startup.py`: Owns login startup integration on both Windows and macOS, including the per-user macOS LaunchAgent used by the **Start at login** UI toggle.
+- `core/startup.py`: Owns startup integration for the Python platforms.
 - `AppIconProvider` & `SystemIconProvider`: Subclasses of `QQuickImageProvider`. QML uses these to request images dynamically (e.g., rendering SVGs cleanly at various DPIs or reading native file icons via `QFileIconProvider`).
 - `_app_icon()`, `_tray_icon()`, & `_render_svg_pixmap()`: Utility functions that construct high-resolution (`QIcon` / `QPixmap`) icons for the taskbar and the system tray, handling platform differences.
 
@@ -76,13 +85,9 @@ python -m unittest discover -s tests
 
 ### Non-Obvious Decisions and Tradeoffs
 
-- **PyInstaller Pathing (`getattr(sys, "frozen", ...)`)**: Handles the different execution environments. Running via `python main_qml.py` uses local paths, but running a compiled PyInstaller build uses paths nested in the macOS `.app/Contents/Resources` or Windows `_internal` folders.
+- **PyInstaller Pathing (`getattr(sys, "frozen", ...)`)**: Handles source and packaged Windows/Linux paths.
 - **Deferred Engine Start:** The core `engine.start()` is wrapped in `QTimer.singleShot(0, ...)`. This ensures the graphical window renders and appears BEFORE the potentially blocking process of binding to HID devices occurs.
 - **Hardcoded PySide6 Plugin Paths:** `QML2_IMPORT_PATH` and `QT_PLUGIN_PATH` are manually set via `os.environ` to work around PyInstaller/PySide6 edge cases where the QML engine fails to locate basic QML modules when bundled.
-- **LaunchAgent Wiring:** macOS autostart is implemented as a per-user LaunchAgent that launches either the frozen app executable or the current interpreter plus `main_qml.py`, so the same UI toggle works in packaged and source-based workflows.
-- **Centralized Accessibility Check:** The backend and startup path share the same native trust check from `core/accessibility.py`, avoiding drift between the permission banner and the live settings state.
-- **macOS System Tray Contrast:** The system tray icon provides two different SVGs (black and white) marked as `Normal` and `Selected`. This macOS-specific trick ensures the menu bar icon automatically inverts color appropriately when the user selects it or toggles dark/light mode.
-- **macOS Debugging (`SIGUSR1`):** A custom signal handler `signal.signal(signal.SIGUSR1, _dump_threads)` is registered, providing developers a hidden way to dump all thread stack traces directly to the terminal via `kill -SIGUSR1 <pid>`. This is highly useful for debugging cross-thread freezing bugs without a debugger attached.
 - **Startup Benchmarks:** Explicit timing logic (`_t0`, `_t1`, ..., `_t8`) is used to profile startup times. Because importing heavy UI frameworks like Qt in Python can be slow, this enforces performance budgets.
 
 ## Architecture
@@ -106,7 +111,11 @@ graph LR
     Detector --> Backend
 ```
 
-The arrows match the runtime call graph: the OS-level mouse hook feeds events into the `Engine`, which decides whether to suppress and rewrite them (firing `Key Simulator`) or pass them through. Connection state and device identity flow back through `Backend` and into QML so the UI stays in sync.
+The diagram above describes the Windows/Linux Python runtime. The macOS runtime is fully
+native: CoreHID discovers Logitech interfaces, a non-exclusive IOKit transport exchanges
+HID++ reports, CoreGraphics event taps rewrite pointer events, and `WorkspaceModel` binds
+the runtime directly to SwiftUI. It also owns wake/unlock recovery and re-subscribes when
+the CoreHID notification stream is reset.
 
 ## How it works
 
@@ -177,7 +186,7 @@ All settings live in `config.json` under the platform config dir (`%APPDATA%\Mou
 - Per-profile app associations (list of `.exe` / bundle / process names)
 - Global settings: DPI, scroll inversion, macOS trackpad filtering, gesture tuning, appearance, debug flags, Smart Shift mode + sensitivity, language, and startup preferences (`start_at_login`, `start_minimized`)
 - Per-device layout override selections for unsupported devices
-- Automatic migration from older config versions (current version `10`)
+- Automatic migration from older config versions (current version `11`)
 
 Logs are written via [`core/log_setup.py`](core/log_setup.py) to a 5 × 5 MB rotating file in `~/Library/Logs/Mouser`, `%APPDATA%\Mouser\logs`, or `$XDG_STATE_HOME/Mouser/logs`. The setup is idempotent and safe to call multiple times — `main_qml.py` invokes it before any Qt or core import so startup output is captured from the very first line.
 
@@ -216,13 +225,14 @@ The window itself is resizable: default 1060 × 700 with a 920 × 620 minimum (`
 mouser/
 ├── main_qml.py                  # Application entry point (PySide6 + QML)
 ├── Mouser.bat                   # Quick-launch batch file
-├── Mouser.spec / Mouser-mac.spec / Mouser-linux.spec  # PyInstaller specs
+├── Mouser.spec / Mouser-linux.spec   # Windows/Linux PyInstaller specs
+├── Mouser-mac.spec / build_macos_app.sh # Legacy Python macOS packaging; not released
 ├── build.bat                    # Windows build (installs deps, verifies hidapi, packages)
-├── build_macos_app.sh           # macOS bundle build + icon/signing flow
+├── native/MouserNative/         # Swift 6 / SwiftUI macOS 27 application and tests
 ├── packaging/linux/             # 69-mouser-logitech.rules + install-linux-permissions.sh
 ├── .github/workflows/
 │   ├── ci.yml                   # CI checks (compile, tests, QML lint)
-│   └── release.yml              # Automated release builds (Windows / macOS arm64+intel / Linux)
+│   └── release.yml              # Windows/Linux packages + native universal macOS DMGs
 ├── README.md / README_CN.md / readme_mac_osx.md / CONTRIBUTING_DEVICES.md / DEVELOPMENT.md
 ├── requirements.txt
 │
@@ -268,14 +278,16 @@ mouser/
 └── images/                      # Logos, app icons, mouse diagrams, screenshots
 ```
 
-## CLI flags & debug overrides
+## Python-only CLI flags & debug overrides
 
-Parsed in [`main_qml.py`](main_qml.py) (`_parse_cli_args`):
+These flags are parsed by [`main_qml.py`](main_qml.py) and apply only to the
+Windows/Linux Python implementation. The native macOS app uses its settings UI,
+`SMAppService`, and a fixed CoreHID + non-exclusive IOKit transport.
 
 | Flag | Behavior |
 |---|---|
 | `--start-hidden` | Boot directly into the tray / menu bar; combined with the `start_minimized` config preference. |
-| `--hid-backend=<auto\|hidapi\|iokit>` | Force a specific HID transport. macOS defaults to `iokit`; other platforms default to `auto`. Use only for debugging. |
+| `--hid-backend=<auto\|hidapi\|iokit>` | Force a Python HID transport for compatibility debugging. |
 
 Example:
 
@@ -302,26 +314,19 @@ pyinstaller Mouser.spec --noconfirm
 ### macOS
 
 ```bash
-pip install -r requirements.txt pyinstaller
-./build_macos_app.sh
+cd native/MouserNative
+xcodegen generate
+xcodebuild test -project MouserNative.xcodeproj -scheme MouserNative -destination 'platform=macOS'
 ```
 
-The script reuses `images/AppIcon.icns` when present, otherwise generates one from `images/logo_icon.png`, then runs PyInstaller with `Mouser-mac.spec`. Output: `dist/Mouser.app`. The bundle runs as `LSUIElement`.
-
-Signing is driven by `MOUSER_SIGN_IDENTITY`:
-
-- Unset: the bundle is ad-hoc signed (`codesign --sign -`). The bundle's code identity can change on rebuild, so macOS may ask for Accessibility permission again. Fine for one-off builds.
-- Set to a codesigning identity SHA-1 (list with `security find-identity -v -p codesigning`): the script signs nested `.dylib` / `.so` / `.framework` files depth-first with `--options runtime`, then signs the outer bundle with the hardened-runtime exceptions at `build_resources/Mouser.entitlements` (`allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`), then runs `codesign --verify --deep --strict --verbose=2` and aborts the build if verification fails. This local developer signing path can reduce macOS Accessibility permission churn across repeated builds when the source, resolved Python interpreter, dependency versions, architecture, signing identity, entitlements, and timestamp policy stay the same.
-
-The script picks the Python interpreter in this order: `MOUSER_PYTHON` env override → active `$VIRTUAL_ENV/bin/python3` or `bin/python` → `./.venv/bin/python3` or `bin/python` → `python3` or `python` on `PATH`. It fails fast with an explicit error if the selected interpreter is missing PyInstaller, so a half-set-up environment can't silently produce a different bundle layout. pyenv, uv, Conda, asdf, Poetry, and similar tools are supported through the active virtualenv, normal `PATH`, or `MOUSER_PYTHON`; the script does not call those tools directly. pyenv users should initialize shims in the shell so `python3` resolves through pyenv, or set `MOUSER_PYTHON` explicitly.
-
-`PYTHONHASHSEED=0` is pinned for the PyInstaller invocation so set iteration during the analysis stage produces byte-identical `base_library.zip` output across rebuilds (otherwise the outer `cdhash` drifts even with a stable signing identity).
-
-The `MOUSER_SIGN_IDENTITY` path is not a notarized release-signing workflow. Public macOS release zips remain ad-hoc signed until a separate Developer ID Application signing, secure timestamp, notarization, stapling, and Gatekeeper assessment workflow exists.
-
-- Build on the architecture you want to ship. `arm64` Python → Apple Silicon, `x86_64` Python → Intel.
-- Set `PYINSTALLER_TARGET_ARCH=arm64|x86_64|universal2` to override (when your Python supports the target).
-- Release CI publishes both `Mouser-macOS.zip` and `Mouser-macOS-intel.zip`.
+The macOS target is a Swift 6 / SwiftUI app using current macOS 27 APIs. Run
+`./release.sh` for universal Developer ID signed and notarized Release/Debug DMGs. The
+script retrieves notarization authorization only from the `Mouser-Notary` Keychain
+profile. Release automation requires a trusted self-hosted macOS runner labelled
+`mouser-release`, because Developer ID and notarization credentials remain in that
+runner's Keychain. Native CI uses the same runner so its Xcode 27 SDK matches the
+macOS 27 deployment target; the test job does not access signing or notarization
+credentials. Python and PyInstaller remain for Windows/Linux builds only.
 
 ### Linux
 
@@ -348,8 +353,8 @@ $s.Save()
 
 ## Debugging tips
 
-- **Thread dump:** `kill -USR1 $(pgrep -f main_qml.py)` triggers `_dump_threads` and prints all stack traces to the terminal — useful for cross-thread freezes without an attached debugger.
-- **Startup timing:** `_t0`–`_t8` markers in `main_qml.py` log per-phase startup costs (env setup, PySide6 imports, core imports). Watch for regressions when adding heavy imports.
-- **HID transport override:** `--hid-backend=iokit|hidapi|auto` lets you isolate transport-specific bugs (e.g. Bolt receivers, BLE quirks).
+- **Python thread dump:** `kill -USR1 $(pgrep -f main_qml.py)` triggers `_dump_threads` on Windows/Linux source runs.
+- **Python startup timing:** `_t0`–`_t8` markers in `main_qml.py` log per-phase startup costs.
+- **Python HID transport override:** `--hid-backend=iokit|hidapi|auto` isolates compatibility transport bugs; it is not a native macOS option.
 - **Logs:** `~/Library/Logs/Mouser/mouser.log`, `%APPDATA%\Mouser\logs\mouser.log`, or `$XDG_STATE_HOME/Mouser/logs/mouser.log`. Stdout is redirected through the rotating file handler; stderr is preserved so logging-handler errors don't recurse.
 - **Linux permissions:** [`core/linux_permissions.py`](core/linux_permissions.py) emits a `LinuxPermissionReport` describing which `/dev/hidraw*`, `/dev/input/event*`, and `/dev/uinput` nodes are blocked. Mouser surfaces this via the UI banner and the log.

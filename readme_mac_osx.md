@@ -1,24 +1,13 @@
-# macOS Support
+# macOS 原生版
 
-Mouser now supports macOS alongside Windows. This document covers macOS-specific setup and known differences.
+macOS 版 Mouser 使用 Swift 6、SwiftUI、IOKit/CoreHID 与当前 macOS API 实现，不打包 Python、PySide6 或 Qt。
 
 ## Requirements
 
-- **macOS 12 (Monterey)** or later recommended
-- **Python 3.11+** (via Homebrew or python.org)
-- **Apple Silicon / M1+**: use an `arm64` Python interpreter if you want a native Apple Silicon app bundle
-- **Intel Macs**: use an `x86_64` Python interpreter if you want a native Intel app bundle
+- **macOS 27** 或更高版本
+- Apple Silicon 或 Intel Mac（同一个 universal DMG）
+- Xcode 27 与 XcodeGen（仅源码构建需要）
 - **Accessibility permission** — required for CGEventTap to intercept mouse events
-
-### Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-On macOS, this will also install:
-- `pyobjc-framework-Quartz` — for CGEventTap (mouse hooking) and CGEvent (key simulation)
-- `pyobjc-framework-Cocoa` — for NSWorkspace (app detection) and NSEvent (media keys)
 
 ## Granting Accessibility Permission
 
@@ -26,17 +15,11 @@ Mouser uses a **CGEventTap** to intercept and suppress mouse button events. macO
 
 1. Open **System Settings → Privacy & Security → Accessibility**
 2. Click the **+** button
-3. Add either:
-  - **Terminal.app** / **iTerm2** (if running from terminal)
-  - The Python binary (e.g. `/usr/local/bin/python3`)
-  - The built `.app` bundle (if packaged)
+3. 添加并启用 **Mouser.app**
 4. Ensure the checkbox is **enabled**
 5. Restart Mouser if it was already running
 
-If Accessibility is not granted, Mouser will print:
-```
-[MouseHook] ERROR: Failed to create CGEventTap!
-```
+如果授权后仍提示未开启，请在列表中移除旧 Mouser 条目，再重新添加当前 `/Applications/Mouser.app` 并重启应用。
 
 ## Platform Differences
 
@@ -68,8 +51,7 @@ Desktop/navigation actions are also remapped to native macOS behavior:
 
 ### HID Access
 
-On macOS, the HID gesture listener uses non-exclusive access (`hid_darwin_set_open_exclusive(0)`)
-so the mouse continues to function normally while Mouser reads HID++ reports.
+原生版通过 `IOHIDDeviceOpen(..., kIOHIDOptionsTypeNone)` 非独占访问 HID++ 接口，Mouser 读写设备时不会抢占鼠标。
 
 ### Trackpad and Magic Mouse Scroll
 
@@ -82,60 +64,55 @@ You can change this in **Point & Scroll → Scroll Direction → Ignore trackpad
 The repository now includes a dedicated macOS bundle flow:
 
 ```bash
-python3 -m pip install -r requirements.txt pyinstaller
-./build_macos_app.sh
+cd native/MouserNative
+xcodegen generate
+open MouserNative.xcodeproj
 ```
 
-This produces:
+For signed release artifacts:
 
-```text
-dist/Mouser.app
+```bash
+./release.sh
 ```
 
 Notes:
 
-- Build on the target architecture. On an M1/M2/M3 Mac, use an `arm64` Python to produce an Apple Silicon app; on an Intel Mac, use an `x86_64` Python to produce an Intel app.
-- You can also set `PYINSTALLER_TARGET_ARCH=arm64` or `PYINSTALLER_TARGET_ARCH=x86_64` before running `./build_macos_app.sh` when your macOS Python environment supports that target.
-- The build flow uses the committed `images/AppIcon.icns` when present; otherwise the script generates an `.icns` icon from `images/logo_icon.png`, then runs PyInstaller with `Mouser-mac.spec`.
-- Signing path depends on `MOUSER_SIGN_IDENTITY`. Unset: the bundle is ad-hoc signed (`codesign --sign -`), which is fine for one-off builds but can rotate the code identity on every rebuild, so macOS Accessibility grants may reset. Set to a codesigning identity (list with `security find-identity -v -p codesigning`, SHA-1 form preferred): the script signs nested `.dylib` / `.so` / `.framework` files depth-first with `--options runtime`, then signs the outer bundle with `build_resources/Mouser.entitlements`, then runs `codesign --verify --deep --strict` and aborts the build if it fails. Stable permission behavior depends on unchanged source, resolved Python interpreter, dependencies, architecture, signing identity, entitlements, and timestamp policy.
-- This signed path is for local repeated developer builds. It is not a notarized release-signing workflow; public macOS release zips remain ad-hoc signed until a separate Developer ID signing, secure timestamp, notarization, stapling, and Gatekeeper assessment workflow exists.
+- The native app requires macOS 27 and uses Swift 6, SwiftUI, CoreHID and HID++ directly.
+- Release and Debug are both universal Developer ID builds. The script notarizes and staples each app and DMG through the `Mouser-Notary` Keychain profile.
+- GitHub release builds require a trusted self-hosted macOS runner labelled `mouser-release`; signing and notarization identities remain in that runner's Keychain.
+- No Apple ID password is stored in the repository or passed on the command line.
 - The app can then be moved to `/Applications/Mouser.app` and launched directly from Finder, Spotlight, or Dock.
-- `pyinstaller Mouser.spec` remains available as a simpler cross-platform build path, but the dedicated macOS script is the preferred bundle flow.
-- Release builds publish `Mouser-macOS.zip` for Apple Silicon and `Mouser-macOS-intel.zip` for Intel Macs.
+- Python/PyInstaller remains the Windows/Linux implementation only.
 
 The packaged app runs as an `LSUIElement`, so it lives in the menu bar instead of showing a Dock icon.
 
-## Running
+## 运行源码
 
 ```bash
-python main_qml.py
-python main_qml.py --start-hidden
+cd native/MouserNative
+xcodegen generate
+open MouserNative.xcodeproj
 ```
 
-Use `--start-hidden` to launch straight into the menu bar without opening the settings window.
+在 Xcode 中运行 `MouserNative` scheme。正式 App 可在设置中选择“启动后隐藏窗口”。
 
 ## Start at Login
 
 Mouser can now manage **Start at login** from the app UI on macOS.
 
-- The toggle writes a LaunchAgent plist to `~/Library/LaunchAgents/io.github.tombadash.mouser.plist`
-- The setting is designed for the packaged `.app`, but it also works in a source checkout by launching the current Python interpreter directly
-- If **Start minimized** is enabled in Mouser, the app still launches tray-first after login because that preference is read from config at startup
-- Turning **Start at login** back off removes that LaunchAgent plist again
+- 原生版使用系统 `SMAppService` 管理登录项，不写入 LaunchAgent 或脚本。
+- “启动后隐藏窗口”与“登录时启动”彼此独立。
 
 ## Accessibility for the Packaged App
 
 If you switch from Terminal-based startup to `Mouser.app`, re-grant Accessibility for the app bundle:
 
 1. Open **System Settings → Privacy & Security → Accessibility**
-2. Remove old Terminal / Python entries if needed
+2. 如有需要，移除旧 Terminal、Python 或旧版 Mouser 条目
 3. Add **Mouser.app**
 4. Ensure it is enabled
 5. Restart Mouser
 
-## Debugging
+## 调试
 
-Send SIGUSR1 to dump all thread stack traces:
-```bash
-kill -USR1 $(pgrep -f main_qml.py)
-```
+在“设置 → 开发者诊断”中开启内存事件日志与 HID++ 手势录制；“导出诊断”不会包含配置内容、账户或凭据。

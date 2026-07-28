@@ -11,6 +11,8 @@ remapping Logitech HID++ mice. The current best experience is on the **MX Master
 and **MX Anywhere** families, with detection and fallback UI support for additional
 Logitech models.
 
+This repository is maintained at [Linmuge/Mouser](https://github.com/Linmuge/Mouser), forked from [TomBadash/Mouser](https://github.com/TomBadash/Mouser). Thanks to Tom Badash and every upstream contributor.
+
 **No telemetry. No cloud. No Logitech account required.**
 
 ---
@@ -37,27 +39,23 @@ Logitech models.
 > **No install required.** Just download, extract, and double-click.
 
 <p align="center">
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-Windows.zip?style=for-the-badge&color=00d4aa&logo=windows&label=Windows&displayAssetName=false" alt="Windows Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/latest/Mouser-Windows.zip?style=for-the-badge&color=00d4aa&logo=windows&label=Windows&displayAssetName=false" alt="Windows Downloads" />
   </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-macOS.zip?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20Apple%20Silicon&displayAssetName=false" alt="macOS Apple Silicon Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Linmuge/Mouser?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20DMG" alt="macOS Release" />
   </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-macOS-intel.zip?style=for-the-badge&color=00d4aa&logo=apple&label=macOS%20Intel&displayAssetName=false" alt="macOS Intel Downloads" />
-  </a>
-  <a href="https://github.com/TomBadash/Mouser/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/latest/Mouser-Linux.zip?style=for-the-badge&color=00d4aa&logo=linux&label=Linux&displayAssetName=false" alt="Linux Downloads" />
+  <a href="https://github.com/Linmuge/Mouser/releases/latest">
+    <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/latest/Mouser-Linux.zip?style=for-the-badge&color=00d4aa&logo=linux&label=Linux&displayAssetName=false" alt="Linux Downloads" />
   </a>
   <br />
-  <img src="https://img.shields.io/github/downloads/TomBadash/Mouser/total?style=for-the-badge&color=00d4aa&label=Total%20Downloads%20(all%20versions)" alt="Downloads" />
+  <img src="https://img.shields.io/github/downloads/Linmuge/Mouser/total?style=for-the-badge&color=00d4aa&label=Total%20Downloads%20(all%20versions)" alt="Downloads" />
 </p>
 
-1. Open the [**latest release page**](https://github.com/TomBadash/Mouser/releases/latest).
+1. Open the [**latest release page**](https://github.com/Linmuge/Mouser/releases/latest).
 2. Download the zip for your platform:
    - **Windows** — `Mouser-Windows.zip`
-   - **macOS (Apple Silicon)** — `Mouser-macOS.zip`
-   - **macOS (Intel)** — `Mouser-macOS-intel.zip`
+   - **macOS (universal)** — `Mouser-<version>.dmg`
    - **Linux** — `Mouser-Linux.zip`
 3. Extract it anywhere (Desktop, Documents, `/Applications`, wherever).
 4. Run the executable: `Mouser.exe`, `Mouser.app`, or `./Mouser`.
@@ -119,7 +117,7 @@ That's it. The app opens, drops a tray / menu-bar icon, and starts remapping imm
 ### Cross-platform
 
 - **Windows, macOS, and Linux** — native hooks per platform (`WH_MOUSE_LL`, `CGEventTap`, `evdev` + `uinput`).
-- **Native Intel and Apple Silicon macOS builds** — separate `Mouser-macOS-intel.zip` and `Mouser-macOS.zip` artifacts; the menu-bar app runs as `LSUIElement` (no Dock icon).
+- **Swift-native macOS app** — one universal Developer ID signed and notarized DMG for Apple Silicon and Intel, built with SwiftUI and CoreHID.
 - **Resizable UI** — main window starts at 1060 × 700 with a 920 × 620 minimum; the mouse diagram and controls reflow as you resize.
 - **Start at login** — Windows registry key, macOS LaunchAgent, and Linux XDG autostart, with an independent **Start minimized** option that boots straight into the tray. Linux autostart intentionally waits about 15 seconds after login so Bluetooth / HID devices are usually ready before Mouser restores device settings.
 - **Single-instance guard** — launching a second copy brings the existing window to the front instead of starting a duplicate.
@@ -195,24 +193,24 @@ Action labels adapt per platform. Windows exposes `Win+D` and `Task View`; macOS
 
 You only need this if you want to hack on Mouser or run a development build. Most users should grab a release zip — see [Download & Run](#download--run).
 
-### Common prerequisites
+### Platform prerequisites
 
-- **Windows 10/11**, **macOS 12+ (Monterey)**, or **Linux** (X11; KDE Wayland for app detection)
-- **Python 3.10+** (tested up to 3.14)
-- A supported Logitech HID++ mouse paired via Bluetooth or a USB receiver
-- **Logitech Options+ must NOT be running** — it conflicts with HID++ access
-- `git` and a working build toolchain
+- **macOS:** macOS 27, Xcode 27, XcodeGen, and a supported Logitech HID++ mouse. The
+  native app uses Swift 6 and does not require Python, PySide6, or Qt.
+- **Windows/Linux:** Windows 10/11 or Linux (X11; KDE Wayland for app detection),
+  Python 3.10+ (tested up to 3.14), and the dependencies in `requirements.txt`.
+- `git` and the platform's working build toolchain.
 
 ```bash
-git clone https://github.com/TomBadash/Mouser.git
+git clone https://github.com/Linmuge/Mouser.git
 cd Mouser
-python -m venv .venv
 ```
 
 <details>
 <summary><strong>Windows</strong></summary>
 
 ```powershell
+python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 
@@ -237,30 +235,16 @@ To launch a source checkout without a console window, create a shortcut that use
 <summary><strong>macOS</strong></summary>
 
 ```bash
-source .venv/bin/activate
-pip install -r requirements.txt
+cd native/MouserNative
+xcodegen generate
+open MouserNative.xcodeproj
 
-# Run from source
-python main_qml.py
-python main_qml.py --start-hidden     # launch directly to menu bar
-
-# Build the native menu-bar bundle
-pip install pyinstaller
-./build_macos_app.sh
+# Developer ID signed + notarized universal Release and Debug DMGs
+./release.sh
 ```
 
-The output is `dist/Mouser.app`. The script reuses `images/AppIcon.icns` when present, otherwise generates one from `images/logo_icon.png`. Signing depends on whether `MOUSER_SIGN_IDENTITY` is set in the environment:
+The macOS app is implemented with Swift 6, SwiftUI, CoreHID and current macOS 27 APIs. It no longer bundles Python, PySide6 or Qt. `release.sh` produces universal `Mouser-<version>.dmg` and `Mouser-<version>-debug.dmg`, signs both configurations with Developer ID, submits them using the `Mouser-Notary` Keychain profile, staples the tickets, and validates Gatekeeper. See [`native/MouserNative/README.md`](native/MouserNative/README.md).
 
-- **Unset (default)**: ad-hoc signs with `codesign --sign -`. Convenient for one-off builds, but the bundle's code identity can change on rebuild, so macOS may ask for Accessibility permission again.
-- **Set to a codesigning identity** (`security find-identity -v -p codesigning` to list them — SHA-1 form preferred): signs every nested `.dylib` / `.so` / `.framework` with hardened runtime options, then signs the outer app with the hardened-runtime exceptions at `build_resources/Mouser.entitlements`. This is a local developer signing path for repeated builds; stable macOS permission behavior depends on keeping the same source, resolved Python interpreter, dependency versions, architecture, signing identity, entitlements, and timestamp policy. A failing `codesign --verify --deep --strict` check aborts the build.
-
-```sh
-MOUSER_SIGN_IDENTITY="ABCD1234..." ./build_macos_app.sh   # local signed build
-```
-
-- This is **not** a notarized release-signing flow. Public macOS release zips remain ad-hoc signed until a separate Developer ID signing, secure timestamp, notarization, stapling, and Gatekeeper validation workflow exists.
-- Build on the architecture you want to ship: an `arm64` Python produces an Apple Silicon bundle, an `x86_64` Python produces an Intel bundle. Set `PYINSTALLER_TARGET_ARCH=arm64|x86_64|universal2` to override.
-- Release CI publishes both `Mouser-macOS.zip` (Apple Silicon) and `Mouser-macOS-intel.zip` (Intel) automatically on tag pushes.
 - Accessibility permission is required. See [readme_mac_osx.md](readme_mac_osx.md) for the full grant flow and platform-specific notes.
 
 </details>
@@ -269,6 +253,7 @@ MOUSER_SIGN_IDENTITY="ABCD1234..." ./build_macos_app.sh   # local signed build
 <summary><strong>Linux</strong></summary>
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -306,7 +291,9 @@ That Linux autostart entry includes a short GNOME startup delay so Mouser does n
 
 > **Automated releases:** pushing a `v*` tag triggers [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds Windows, macOS (Apple Silicon + Intel), and Linux artifacts in CI and uploads them to the GitHub Release.
 
-For project layout, the architecture diagram, the HID++ gesture detector, the Engine + reconnection flow, debug CLI flags (`--hid-backend=iokit|hidapi|auto`), and how to run the test suite, see [DEVELOPMENT.md](DEVELOPMENT.md). To add a new device, see [CONTRIBUTING_DEVICES.md](CONTRIBUTING_DEVICES.md).
+For project layout, both runtime architectures, native HID++ recovery, Python compatibility
+debug flags, and test commands, see [DEVELOPMENT.md](DEVELOPMENT.md). To add a new device,
+see [CONTRIBUTING_DEVICES.md](CONTRIBUTING_DEVICES.md).
 
 ---
 
