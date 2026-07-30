@@ -192,7 +192,7 @@ struct GitHubReleaseChecker: ReleaseChecking {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let version = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "4.0.0"
+        ) as? String ?? "4.0.1"
         request.setValue("Mouser/\(version)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let response = response as? HTTPURLResponse else {

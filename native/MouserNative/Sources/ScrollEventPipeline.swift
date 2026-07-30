@@ -205,6 +205,10 @@ struct SessionRecoveryPlanner: Sendable {
     mutating func markHIDSettingsRestored() {
         awaitsHIDSettingsRestore = false
     }
+
+    mutating func armHIDSettingsRestore() {
+        awaitsHIDSettingsRestore = true
+    }
 }
 
 struct ConsoleLockTransitionDetector: Sendable {

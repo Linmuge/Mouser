@@ -177,6 +177,90 @@ enum WheelInversionBackend: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum HIDPPSettingsHealth: Equatable, Sendable {
+    case unavailable
+    case healthy
+    case needsRestore
+}
+
+struct HIDPPSettingsHealthEvaluator: Sendable {
+    static func evaluate(
+        _ state: HIDPPDeviceState,
+        identity: HIDPPDeviceIdentity,
+        dpi: Int,
+        smartShiftEnabled: Bool,
+        smartShiftMode: SmartShiftMode,
+        smartShiftThreshold: Int,
+        scrollForce: Int,
+        invertVerticalScroll: Bool,
+        wheelInversionBackend: WheelInversionBackend,
+        forceSensitivity: Int?,
+    ) -> HIDPPSettingsHealth {
+        var observedSetting = false
+
+        if identity.featureIndexes[.adjustableDPI] != nil,
+           let observedDPI = state.dpi {
+            observedSetting = true
+            if observedDPI != dpi { return .needsRestore }
+        }
+
+        if identity.featureIndexes[.smartShiftEnhanced] != nil ||
+            identity.featureIndexes[.smartShift] != nil,
+           let observedSmartShift = state.smartShift {
+            observedSetting = true
+            if observedSmartShift.automatic != smartShiftEnabled {
+                return .needsRestore
+            }
+            if smartShiftEnabled {
+                if observedSmartShift.threshold != smartShiftThreshold {
+                    return .needsRestore
+                }
+                if identity.featureIndexes[.smartShiftEnhanced] != nil,
+                   observedSmartShift.scrollForce != scrollForce {
+                    return .needsRestore
+                }
+            } else if observedSmartShift.mode != smartShiftMode {
+                return .needsRestore
+            }
+        }
+
+        if identity.featureIndexes[.highResolutionWheelEnhanced] != nil,
+           let observedInversion = state.verticalScrollInverted {
+            observedSetting = true
+            let expectedInversion = wheelInversionBackend == .automatic &&
+                invertVerticalScroll
+            if observedInversion != expectedInversion { return .needsRestore }
+        }
+
+        if identity.featureIndexes[.forceSensing] != nil,
+           let forceSensitivity,
+           let observedForce = state.forceSensing {
+            observedSetting = true
+            if observedForce.currentValue != forceSensitivity { return .needsRestore }
+        }
+
+        return observedSetting ? .healthy : .unavailable
+    }
+}
+
+struct HIDPPActivityHealthCheckGate: Sendable {
+    private var lastCheckUptime: Duration?
+    private let minimumInterval: Duration
+
+    init(minimumInterval: Duration = .seconds(10)) {
+        self.minimumInterval = minimumInterval
+    }
+
+    mutating func shouldCheck(at uptime: Duration) -> Bool {
+        if let lastCheckUptime,
+           uptime - lastCheckUptime < minimumInterval {
+            return false
+        }
+        lastCheckUptime = uptime
+        return true
+    }
+}
+
 enum WorkspaceSection: String, CaseIterable, Identifiable, Sendable {
     case overview
     case buttons
@@ -692,6 +776,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var recoveryPlanner = SessionRecoveryPlanner()
     @ObservationIgnored private var recoveryTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var deviceActivityRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var hidActivityHealthCheckGate = HIDPPActivityHealthCheckGate()
     @ObservationIgnored private var awaitingHIDWakeRecovery = false
     @ObservationIgnored private var hidRecoveryInProgress = false
     @ObservationIgnored private var hidProbeTask: Task<Void, Never>?
@@ -749,7 +834,7 @@ final class WorkspaceModel {
         screenshotDirectory: String = "",
         currentVersion: String = Bundle.main.object(
             forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String ?? "4.0.0",
+        ) as? String ?? "4.0.1",
         gestureThreshold: Double = 50,
         gestureCommitWindowMilliseconds: Double = 400,
         gestureSettleMilliseconds: Double = 90,
@@ -2560,15 +2645,23 @@ final class WorkspaceModel {
 
     private func handleDeviceActivityForRecovery() {
         guard nativeHIDProbeEnabled,
-              awaitingHIDWakeRecovery,
               !hidRecoveryInProgress,
               deviceActivityRecoveryTask == nil
         else { return }
         let uptime = Duration.seconds(ProcessInfo.processInfo.systemUptime)
-        guard !recoveryPlanner.schedule(
-            for: .deviceActivity,
-            uptime: uptime
-        ).isEmpty else { return }
+
+        if !awaitingHIDWakeRecovery {
+            guard hidActivityHealthCheckGate.shouldCheck(at: uptime) else { return }
+            deviceActivityRecoveryTask = Task { [weak self] in
+                guard let self else { return }
+                await self.checkHIDPPSettingsHealthAfterActivity()
+                self.deviceActivityRecoveryTask = nil
+            }
+            return
+        }
+
+        guard !recoveryPlanner.schedule(for: .deviceActivity, uptime: uptime).isEmpty
+        else { return }
 
         deviceActivityRecoveryTask = Task { [weak self] in
             guard let self else { return }
@@ -2576,6 +2669,46 @@ final class WorkspaceModel {
             self.deviceActivityRecoveryTask = nil
             if restored {
                 self.finishHIDWakeRecovery()
+            }
+        }
+    }
+
+    private func checkHIDPPSettingsHealthAfterActivity() async {
+        guard let hidppController, let hidppIdentity else {
+            awaitingHIDWakeRecovery = true
+            recoveryPlanner.armHIDSettingsRestore()
+            synchronizeEventTap()
+            return
+        }
+
+        let state = await hidppController.readState(timeout: .milliseconds(700))
+        guard !Task.isCancelled else { return }
+        let health = HIDPPSettingsHealthEvaluator.evaluate(
+            state,
+            identity: hidppIdentity,
+            dpi: Int(dpi),
+            smartShiftEnabled: smartShiftEnabled,
+            smartShiftMode: smartShiftMode,
+            smartShiftThreshold: Int(smartShiftThreshold),
+            scrollForce: Int(scrollForce),
+            invertVerticalScroll: invertVerticalScroll,
+            wheelInversionBackend: wheelInversionBackend,
+            forceSensitivity: hasConfiguredForceSensitivity ? Int(forceSensitivity) : nil
+        )
+
+        switch health {
+        case .healthy:
+            return
+        case .unavailable:
+            awaitingHIDWakeRecovery = true
+            recoveryPlanner.armHIDSettingsRestore()
+            synchronizeEventTap()
+        case .needsRestore:
+            awaitingHIDWakeRecovery = true
+            recoveryPlanner.armHIDSettingsRestore()
+            synchronizeEventTap()
+            if await attemptHIDWakeRecovery() {
+                finishHIDWakeRecovery()
             }
         }
     }

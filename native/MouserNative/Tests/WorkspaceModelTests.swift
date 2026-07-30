@@ -341,6 +341,10 @@ private actor WorkspaceHIDController: HIDPPDeviceControlling {
 
     func readState(timeout: Duration) -> HIDPPDeviceState { state }
 
+    func resetCalls() {
+        calls.removeAll()
+    }
+
     func setDPI(_ dpi: Int, timeout: Duration) {
         calls.append(.dpi(dpi))
     }
@@ -1172,6 +1176,70 @@ struct WorkspaceModelTests {
         #expect(model.hidppStatusText == "已恢复设备设置")
     }
 
+    @Test("HID health evaluation distinguishes reset, healthy, and sleeping devices")
+    func hidHealthEvaluationIsConservative() {
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [
+                .adjustableDPI: 0x0C,
+                .smartShift: 0x0D,
+                .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+            ]
+        )
+        func evaluate(_ state: HIDPPDeviceState) -> HIDPPSettingsHealth {
+            HIDPPSettingsHealthEvaluator.evaluate(
+                state,
+                identity: identity,
+                dpi: 1600,
+                smartShiftEnabled: false,
+                smartShiftMode: .ratchet,
+                smartShiftThreshold: 10,
+                scrollForce: 10,
+                invertVerticalScroll: true,
+                wheelInversionBackend: .automatic,
+                forceSensitivity: nil
+            )
+        }
+
+        #expect(evaluate(HIDPPDeviceState(
+            dpi: 800,
+            smartShift: nil,
+            battery: nil,
+            verticalScrollInverted: nil
+        )) == .needsRestore)
+        #expect(evaluate(HIDPPDeviceState(
+            dpi: 1600,
+            smartShift: HIDPPSmartShiftState(
+                mode: .ratchet,
+                automatic: false,
+                threshold: 25,
+                scrollForce: 0
+            ),
+            battery: nil,
+            verticalScrollInverted: true
+        )) == .healthy)
+        #expect(evaluate(HIDPPDeviceState(
+            dpi: nil,
+            smartShift: nil,
+            battery: HIDPPBatteryState(level: 80, charging: false),
+            verticalScrollInverted: nil
+        )) == .unavailable)
+    }
+
+    @Test("HID activity health checks are rate limited")
+    func hidActivityHealthChecksAreRateLimited() {
+        var gate = HIDPPActivityHealthCheckGate(minimumInterval: .seconds(10))
+        let initial = gate.shouldCheck(at: .seconds(10))
+        let throttled = gate.shouldCheck(at: .seconds(15))
+        let afterInterval = gate.shouldCheck(at: .seconds(20))
+
+        #expect(initial)
+        #expect(!throttled)
+        #expect(afterInterval)
+    }
+
     @Test("mouse activity after late wake reapplies settings after unlock retries missed")
     func lateMouseWakeReappliesSettingsOnDeviceActivity() async {
         let controller = WorkspaceHIDController(state: HIDPPDeviceState(
@@ -1236,6 +1304,78 @@ struct WorkspaceModelTests {
         #expect(eventTap.state == .running)
 
         await discovery.makeDeviceAvailable()
+        eventTap.simulateDeviceActivity()
+        for _ in 0..<50 where await controller.calls.count < 4 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(await controller.calls == [
+            .dpi(1600),
+            .smartShift(.ratchet, false, 10, 10),
+            .vertical(true),
+            .horizontal(true),
+        ])
+    }
+
+    @Test("device activity repairs reset settings when remote control emits no wake signal")
+    func remoteControlRecoveryDoesNotRequireSystemWakeSignal() async {
+        let controller = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: 800,
+            smartShift: HIDPPSmartShiftState(
+                mode: .freeSpin,
+                automatic: true,
+                threshold: 25,
+                scrollForce: 0
+            ),
+            battery: nil,
+            verticalScrollInverted: false
+        ))
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [
+                .adjustableDPI: 0x0C,
+                .smartShift: 0x0D,
+                .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+            ]
+        )
+        let eventTap = WorkspaceTestEventTap()
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: true,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftMode: .ratchet,
+            smartShiftThreshold: 10,
+            scrollForce: 10,
+            invertVerticalScroll: true,
+            invertHorizontalScroll: true,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: eventTap,
+            deviceDiscovery: WorkspaceHIDDiscovery(identity: identity, controller: controller),
+            nativeHIDProbeEnabled: true
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 2,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+        #expect(await model.refreshHIDPPIdentity(reapplySettings: true))
+        await controller.resetCalls()
+
         eventTap.simulateDeviceActivity()
         for _ in 0..<50 where await controller.calls.count < 4 {
             try? await Task.sleep(for: .milliseconds(10))
