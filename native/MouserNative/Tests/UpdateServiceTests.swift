@@ -71,6 +71,51 @@ struct UpdateServiceTests {
         #expect(try GitHubReleaseDecoder.decode(payload).installAsset == nil)
     }
 
+    @Test("installer accepts only the canonical fork asset for the release version")
+    func rejectsNonCanonicalInstallAssets() {
+        let digest = String(repeating: "a", count: 64)
+        let canonical = MouserReleaseAsset(
+            name: "Mouser-4.0.1.dmg",
+            downloadURL: URL(
+                string: "https://github.com/Linmuge/Mouser/releases/download/v4.0.1/Mouser-4.0.1.dmg"
+            )!,
+            size: 42,
+            contentType: "application/x-apple-diskimage",
+            sha256: digest
+        )
+        let traversal = MouserReleaseAsset(
+            name: "../Mouser-4.0.1.dmg",
+            downloadURL: canonical.downloadURL,
+            size: 42,
+            contentType: canonical.contentType,
+            sha256: digest
+        )
+        let wrongRepository = MouserReleaseAsset(
+            name: canonical.name,
+            downloadURL: URL(
+                string: "https://github.com/TomBadash/Mouser/releases/download/v4.0.1/Mouser-4.0.1.dmg"
+            )!,
+            size: 42,
+            contentType: canonical.contentType,
+            sha256: digest
+        )
+
+        func release(with asset: MouserReleaseAsset) -> MouserRelease {
+            MouserRelease(
+                version: "4.0.1",
+                name: "Mouser 4.0.1",
+                notes: "",
+                releaseURL: URL(string: "https://github.com/Linmuge/Mouser/releases/tag/v4.0.1")!,
+                isPrerelease: false,
+                assets: [asset]
+            )
+        }
+
+        #expect(release(with: canonical).installAsset == canonical)
+        #expect(release(with: traversal).installAsset == nil)
+        #expect(release(with: wrongRepository).installAsset == nil)
+    }
+
     @Test("download verification rejects size and digest mismatches")
     func verifiesDownloadedBytes() throws {
         let data = Data("Mouser update".utf8)
@@ -120,6 +165,66 @@ struct UpdateServiceTests {
         #expect(throws: UpdateInstallError.self) {
             try unsafePlan.validatePaths()
         }
+    }
+
+    @Test("native installer pins the official bundle and Developer ID team")
+    func pinsOfficialSigningIdentity() {
+        #expect(MouserApplicationCodeIdentity.bundleIdentifier == "io.github.tombadash.mouser")
+        #expect(MouserApplicationCodeIdentity.teamIdentifier == "99M5SZBF38")
+        #expect(
+            MouserApplicationCodeIdentity.requirementText.contains(
+                "certificate leaf[subject.OU] = \"99M5SZBF38\""
+            )
+        )
+        #expect(
+            MouserApplicationCodeIdentity.requirementText.contains(
+                "certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+            )
+        )
+    }
+
+    @Test("a preflight helper failure is structured, consumed, and reopens the intact app")
+    func failedHelperResultReopensInstalledApplication() throws {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: "Mouser-update-helper-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installURL = root.appending(path: "Mouser.app", directoryHint: .isDirectory)
+        let resultURL = root.appending(path: "native-update-result.json")
+        try FileManager.default.createDirectory(
+            at: installURL,
+            withIntermediateDirectories: true
+        )
+        let plan = NativeUpdateInstallPlan(
+            parentProcessID: 123,
+            stagedAppPath: root.appending(
+                path: ".Mouser.app.update-test/Mouser.app",
+                directoryHint: .isDirectory
+            ).path,
+            installAppPath: installURL.path,
+            backupAppPath: root.appending(
+                path: ".Mouser.backup-test.app",
+                directoryHint: .isDirectory
+            ).path,
+            expectedBundleIdentifier: MouserApplicationCodeIdentity.bundleIdentifier,
+            expectedVersion: "4.1.0"
+        )
+        var reopenedURL: URL?
+
+        MacUpdateInstallHelper.finishFailedInstall(
+            message: "更新包签名身份不匹配",
+            plan: plan,
+            resultURL: resultURL,
+            reopen: { reopenedURL = $0 }
+        )
+
+        #expect(reopenedURL == installURL)
+        #expect(
+            MacUpdateInstallHelper.cleanupCompletedInstall(at: resultURL) ==
+                .failed("更新包签名身份不匹配")
+        )
+        #expect(!FileManager.default.fileExists(atPath: resultURL.path))
     }
 
     @Test("diskutil attachment parser retains the mounted volume and whole disk")

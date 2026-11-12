@@ -4,7 +4,7 @@ struct ContentView: View {
     @Bindable var model: WorkspaceModel
 
     var body: some View {
-        PrecisionWorkspaceView(model: model)
+        MouserWorkspaceView(model: model)
             .background {
                 WindowAppearanceBridge(mode: model.appearanceMode)
             }

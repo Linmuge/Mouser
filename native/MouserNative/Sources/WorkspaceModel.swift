@@ -138,11 +138,13 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         "导出失败：%@",
         "正在下载并验证 Mouser %@…",
         "安装失败：%@",
+        "上次更新失败：%@",
         "修改失败：%@",
         "保存失败：%@",
         "同步失败：%@",
         "已连接现有配置 v%@",
         "无法读取现有配置：%@",
+        "已恢复默认配置，原配置已备份为 %@",
         "已识别 · 接收器槽位 %@",
         "已连接 · 接收器槽位 %@",
         "部分设备设置恢复失败（%@）",
@@ -160,6 +162,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
         "设置临时配置权限失败（%@）：%@",
         "同步临时配置失败（%@）：%@",
         "配置路径无效：%@",
+        "损坏配置无法备份（%@）：%@",
     ]
 }
 
@@ -193,54 +196,136 @@ struct HIDPPSettingsHealthEvaluator: Sendable {
         smartShiftThreshold: Int,
         scrollForce: Int,
         invertVerticalScroll: Bool,
+        invertHorizontalScroll: Bool,
         wheelInversionBackend: WheelInversionBackend,
+        hapticsEnabled: Bool,
+        hapticStrength: Int,
         forceSensitivity: Int?,
+        specialInputButtons: Set<MouseButton>,
+        rawXYButtons: Set<MouseButton>,
+        specialInputReporting: [MouseButton: HIDPPCIDReportingState]?,
     ) -> HIDPPSettingsHealth {
-        var observedSetting = false
+        var expectedSetting = false
+        var missingSetting = false
 
-        if identity.featureIndexes[.adjustableDPI] != nil,
-           let observedDPI = state.dpi {
-            observedSetting = true
-            if observedDPI != dpi { return .needsRestore }
+        if identity.featureIndexes[.adjustableDPI] != nil {
+            expectedSetting = true
+            if let observedDPI = state.dpi {
+                if observedDPI != dpi { return .needsRestore }
+            } else {
+                missingSetting = true
+            }
         }
 
         if identity.featureIndexes[.smartShiftEnhanced] != nil ||
-            identity.featureIndexes[.smartShift] != nil,
-           let observedSmartShift = state.smartShift {
-            observedSetting = true
-            if observedSmartShift.automatic != smartShiftEnabled {
-                return .needsRestore
-            }
-            if smartShiftEnabled {
-                if observedSmartShift.threshold != smartShiftThreshold {
+            identity.featureIndexes[.smartShift] != nil
+        {
+            expectedSetting = true
+            if let observedSmartShift = state.smartShift {
+                if observedSmartShift.automatic != smartShiftEnabled {
                     return .needsRestore
                 }
-                if identity.featureIndexes[.smartShiftEnhanced] != nil,
-                   observedSmartShift.scrollForce != scrollForce {
+                if smartShiftEnabled {
+                    if observedSmartShift.threshold != smartShiftThreshold {
+                        return .needsRestore
+                    }
+                    if identity.featureIndexes[.smartShiftEnhanced] != nil,
+                       observedSmartShift.scrollForce != scrollForce {
+                        return .needsRestore
+                    }
+                } else if observedSmartShift.mode != smartShiftMode {
                     return .needsRestore
                 }
-            } else if observedSmartShift.mode != smartShiftMode {
-                return .needsRestore
+            } else {
+                missingSetting = true
             }
         }
 
-        if identity.featureIndexes[.highResolutionWheelEnhanced] != nil,
-           let observedInversion = state.verticalScrollInverted {
-            observedSetting = true
-            let expectedInversion = wheelInversionBackend == .automatic &&
-                invertVerticalScroll
-            if observedInversion != expectedInversion { return .needsRestore }
+        if identity.featureIndexes[.highResolutionWheelEnhanced] != nil {
+            expectedSetting = true
+            if let observedInversion = state.verticalScrollInverted {
+                let expectedInversion = wheelInversionBackend == .automatic &&
+                    invertVerticalScroll
+                if observedInversion != expectedInversion { return .needsRestore }
+            } else {
+                missingSetting = true
+            }
+        }
+
+        if identity.featureIndexes[.thumbWheel] != nil {
+            expectedSetting = true
+            if let observedInversion = state.horizontalScrollInverted {
+                let expectedInversion = wheelInversionBackend == .automatic &&
+                    invertHorizontalScroll
+                if observedInversion != expectedInversion { return .needsRestore }
+            } else {
+                missingSetting = true
+            }
+        }
+
+        if identity.featureIndexes[.haptic] != nil, hapticsEnabled {
+            expectedSetting = true
+            if let observedHaptic = state.haptic {
+                let expectedLevel = HIDPPCommands.hapticDeviceLevel(for: hapticStrength)
+                if !observedHaptic.enabled || observedHaptic.deviceLevel != expectedLevel {
+                    return .needsRestore
+                }
+            } else {
+                missingSetting = true
+            }
         }
 
         if identity.featureIndexes[.forceSensing] != nil,
-           let forceSensitivity,
-           let observedForce = state.forceSensing {
-            observedSetting = true
-            if observedForce.currentValue != forceSensitivity { return .needsRestore }
+           let forceSensitivity
+        {
+            expectedSetting = true
+            if let observedForce = state.forceSensing {
+                if observedForce.currentValue != forceSensitivity { return .needsRestore }
+            } else {
+                missingSetting = true
+            }
         }
 
-        return observedSetting ? .healthy : .unavailable
+        if !specialInputButtons.isEmpty {
+            expectedSetting = true
+            if identity.featureIndexes[.reprogrammableControlsV4] == nil {
+                missingSetting = true
+            } else if let specialInputReporting {
+                for button in specialInputButtons {
+                    guard let reporting = specialInputReporting[button] else {
+                        missingSetting = true
+                        continue
+                    }
+                    if !reporting.isTemporarilyDiverted ||
+                        reporting.isRawXYDiverted != rawXYButtons.contains(button)
+                    {
+                        return .needsRestore
+                    }
+                }
+            } else {
+                missingSetting = true
+            }
+        }
+
+        guard expectedSetting, !missingSetting else { return .unavailable }
+        return .healthy
     }
+}
+
+private struct HIDPPSpecialInputConfiguration {
+    let mappedButtons: Set<MouseButton>
+    let rawXYButtons: Set<MouseButton>
+    let ringButtons: Set<MouseButton>
+    let nativeGestureButtons: Set<MouseButton>
+    let externalGestureButtons: Set<MouseButton>
+
+    static let empty = HIDPPSpecialInputConfiguration(
+        mappedButtons: [],
+        rawXYButtons: [],
+        ringButtons: [],
+        nativeGestureButtons: [],
+        externalGestureButtons: []
+    )
 }
 
 struct HIDPPActivityHealthCheckGate: Sendable {
@@ -461,6 +546,61 @@ struct AppProfile: Identifiable, Equatable, Sendable {
             return mappings.first(where: { $0.button == button })?.actionID
         }
         return supplementalMappings[key]
+    }
+}
+
+enum ConfigurationPersistenceState: Equatable, Sendable {
+    case loading
+    case saving
+    case saved(String)
+    case recovered(String)
+    case failed(String)
+    case preview
+
+    var message: String {
+        switch self {
+        case .loading: "正在读取配置…"
+        case .saving: "正在保存更改…"
+        case let .saved(message), let .recovered(message), let .failed(message): message
+        case .preview: "预览数据"
+        }
+    }
+}
+
+struct ConfigurationWriteStateTracker: Sendable {
+    private struct Failure: Sendable {
+        let generation: Int
+        let message: String
+    }
+
+    private var generations: [String: Int] = [:]
+    private var writesInFlight: [String: Int] = [:]
+    private var failures: [String: Failure] = [:]
+
+    var isSaving: Bool { !writesInFlight.isEmpty }
+
+    var failureMessage: String? {
+        failures.sorted { $0.key < $1.key }.first?.value.message
+    }
+
+    mutating func begin(key: String) -> Int {
+        let generation = (generations[key] ?? 0) + 1
+        generations[key] = generation
+        writesInFlight[key] = generation
+        failures.removeValue(forKey: key)
+        return generation
+    }
+
+    @discardableResult
+    mutating func finish(key: String, generation: Int, error: String? = nil) -> Bool {
+        guard writesInFlight[key] == generation else { return false }
+        writesInFlight.removeValue(forKey: key)
+        if let error {
+            failures[key] = Failure(generation: generation, message: error)
+        } else if let failure = failures[key], failure.generation <= generation {
+            failures.removeValue(forKey: key)
+        }
+        return true
     }
 }
 
@@ -714,6 +854,9 @@ final class WorkspaceModel {
     var profiles: [AppProfile]
     private(set) var configurationLoaded = false
     private(set) var configurationStatus = "正在读取配置…"
+    private(set) var configurationPersistenceState: ConfigurationPersistenceState = .loading
+    private(set) var shouldStartMinimizedAfterBootstrap = false
+    private(set) var shouldPresentSettingsAfterBootstrap = false
     private(set) var nativeEventTapEnabled: Bool
     private(set) var eventTapState: ScrollEventTapState = .stopped
     private(set) var nativeHIDProbeEnabled: Bool
@@ -772,6 +915,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var isApplyingHIDState = false
     @ObservationIgnored private var hasConfiguredForceSensitivity = false
     @ObservationIgnored private var pendingWrites: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var configurationWriteTracker = ConfigurationWriteStateTracker()
     @ObservationIgnored private var pendingHIDWrites: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var recoveryPlanner = SessionRecoveryPlanner()
     @ObservationIgnored private var recoveryTasks: [Task<Void, Never>] = []
@@ -780,10 +924,14 @@ final class WorkspaceModel {
     @ObservationIgnored private var awaitingHIDWakeRecovery = false
     @ObservationIgnored private var hidRecoveryInProgress = false
     @ObservationIgnored private var hidProbeTask: Task<Void, Never>?
+    @ObservationIgnored private let hidppHeartbeatInterval: Duration
+    @ObservationIgnored private var hidProbeGeneration: UInt64 = 0
+    @ObservationIgnored private var hidppControllerGeneration: UInt64?
     @ObservationIgnored private var batteryMonitorTask: Task<Void, Never>?
     @ObservationIgnored private var specialButtonTask: Task<Void, Never>?
     @ObservationIgnored private var actionsRingHoldTask: Task<Void, Never>?
     @ObservationIgnored private var updateCheckTask: Task<Void, Never>?
+    @ObservationIgnored private var updateCheckGeneration: UInt64 = 0
     @ObservationIgnored private var screenshotCaptureTask: Task<Void, Never>?
     @ObservationIgnored private var hapticRouter = HapticTriggerRouter(
         enabled: true,
@@ -800,6 +948,7 @@ final class WorkspaceModel {
     @ObservationIgnored private var hidppController: (any HIDPPDeviceControlling)?
     @ObservationIgnored private var detectedLogitechDevices: [LogitechHIDDevice] = []
     @ObservationIgnored private var workspaceObservationTokens: [NotificationCenter.ObservationToken] = []
+    @ObservationIgnored private var screenWakeObserver: ObserverTokenBox?
     @ObservationIgnored private var screenUnlockObserver: ObserverTokenBox?
 
     init(
@@ -858,7 +1007,8 @@ final class WorkspaceModel {
         updateInstaller: any NativeUpdatePreparing = MacNativeUpdateInstaller(),
         deviceDiscovery: any LogitechDeviceDiscovering = CoreHIDLogitechDeviceDiscovery(),
         nativeHIDProbeEnabled: Bool = false,
-        nativeEventTapEnabled: Bool = false
+        nativeEventTapEnabled: Bool = false,
+        hidppHeartbeatInterval: Duration = .seconds(5)
     ) {
         self.selectedProfileID = selectedProfileID
         self.accessibilityGranted = accessibilityGranted
@@ -917,7 +1067,9 @@ final class WorkspaceModel {
         self.nativeHIDProbeEnabled = nativeHIDProbeEnabled
         hidppIdentity = nil
         self.nativeEventTapEnabled = nativeEventTapEnabled
+        self.hidppHeartbeatInterval = hidppHeartbeatInterval
         configurationStatus = configStore == nil ? "预览数据" : "正在读取配置…"
+        configurationPersistenceState = configStore == nil ? .preview : .loading
         eventTapState = eventTap.state
         hapticRouter = HapticTriggerRouter(
             enabled: hapticsEnabled,
@@ -953,6 +1105,9 @@ final class WorkspaceModel {
         let center = NSWorkspace.shared.notificationCenter
         for token in workspaceObservationTokens {
             center.removeObserver(token)
+        }
+        if let screenWakeObserver {
+            center.removeObserver(screenWakeObserver.value)
         }
         if let screenUnlockObserver {
             DistributedNotificationCenter.default().removeObserver(screenUnlockObserver.value)
@@ -1202,17 +1357,27 @@ final class WorkspaceModel {
     }
 
     func checkForUpdates() async {
+        updateCheckGeneration &+= 1
+        let generation = updateCheckGeneration
         updateState = .checking
         do {
             let release = try await releaseChecker.latestRelease()
+            try Task.checkCancellation()
+            guard generation == updateCheckGeneration else { return }
             updateState = SemanticVersion.isNewer(release.version, than: currentVersion)
                 ? .available(release)
                 : .upToDate
         } catch is CancellationError {
+            guard generation == updateCheckGeneration else { return }
             updateState = .idle
         } catch {
-            updateState = .failed(error.localizedDescription)
+            guard generation == updateCheckGeneration else { return }
+            updateState = Task.isCancelled ? .idle : .failed(error.localizedDescription)
         }
+    }
+
+    func reportPreviousUpdateInstallFailure(_ message: String) {
+        updateInstallStatusText = "上次更新失败：\(message)"
     }
 
     func openLatestRelease() {
@@ -1322,11 +1487,13 @@ final class WorkspaceModel {
         guard let configStore else { return }
         let taskKey = "setting.start_at_login"
         pendingWrites[taskKey]?.cancel()
+        let generation = beginConfigurationWrite(key: taskKey)
         pendingWrites[taskKey] = Task { [weak self] in
             do {
                 try await configStore.update(.setting(key: "start_at_login", value: .bool(enabled)))
                 guard !Task.isCancelled else { return }
-                self?.configurationStatus = "更改已保存"
+                self?.configurationLoaded = true
+                self?.finishConfigurationWrite(key: taskKey, generation: generation)
             } catch is CancellationError {
                 return
             } catch {
@@ -1338,6 +1505,11 @@ final class WorkspaceModel {
                 } catch {
                     self.loginItemStatusText = "登录项状态不一致，请重新启动 Mouser"
                 }
+                self.finishConfigurationWrite(
+                    key: taskKey,
+                    generation: generation,
+                    error: error.localizedDescription
+                )
             }
         }
     }
@@ -1360,16 +1532,36 @@ final class WorkspaceModel {
     func loadConfiguration() async {
         guard let configStore else {
             configurationLoaded = true
+            configurationPersistenceState = .preview
             return
         }
         do {
-            let snapshot = try await configStore.load()
-            apply(snapshot)
+            let result = try await configStore.loadWithDisposition()
+            apply(result.snapshot)
             configurationLoaded = true
-            configurationStatus = "已连接现有配置 v\(snapshot.version)"
+            switch result.disposition {
+            case .existing:
+                shouldStartMinimizedAfterBootstrap = result.snapshot.startMinimized
+                shouldPresentSettingsAfterBootstrap = false
+                configurationStatus = "已连接现有配置 v\(result.snapshot.version)"
+                configurationPersistenceState = .saved("配置已加载")
+            case .created:
+                shouldStartMinimizedAfterBootstrap = false
+                shouldPresentSettingsAfterBootstrap = true
+                configurationStatus = "已创建默认配置"
+                configurationPersistenceState = .saved(configurationStatus)
+            case let .recovered(backupFileName):
+                shouldStartMinimizedAfterBootstrap = false
+                shouldPresentSettingsAfterBootstrap = true
+                configurationStatus = "已恢复默认配置，原配置已备份为 \(backupFileName)"
+                configurationPersistenceState = .recovered(configurationStatus)
+            }
         } catch {
             configurationLoaded = false
+            shouldStartMinimizedAfterBootstrap = false
+            shouldPresentSettingsAfterBootstrap = true
             configurationStatus = "无法读取现有配置：\(error.localizedDescription)"
+            configurationPersistenceState = .failed(configurationStatus)
         }
     }
 
@@ -1388,6 +1580,28 @@ final class WorkspaceModel {
         for await devices in deviceDiscovery.updates() {
             guard !Task.isCancelled else { return }
             handleDetectedDevicesUpdate(devices)
+        }
+    }
+
+    func monitorHIDPPRecoveryHeartbeat() async {
+        // The CoreHID notification stream can go silent (sleep, receiver
+        // resets, startup races) while the receiver stays enumerated, which
+        // strands the probe in "正在探测设备…" with nothing left to retrigger
+        // it. Poll for that state and relaunch the probe ourselves.
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: hidppHeartbeatInterval)
+            } catch {
+                return
+            }
+            guard nativeHIDProbeEnabled,
+                  hidppIdentity == nil,
+                  !hidRecoveryInProgress,
+                  LogitechDeviceInventory.preferredHIDPPInterface(
+                      from: detectedLogitechDevices
+                  ) != nil
+            else { continue }
+            launchHIDProbe(reapplySettings: awaitingHIDWakeRecovery)
         }
     }
 
@@ -1466,32 +1680,52 @@ final class WorkspaceModel {
 
     @discardableResult
     func refreshHIDPPIdentity(reapplySettings: Bool = false) async -> Bool {
+        let generation = beginHIDProbeGeneration()
+        return await refreshHIDPPIdentity(
+            reapplySettings: reapplySettings,
+            generation: generation
+        )
+    }
+
+    private func refreshHIDPPIdentity(
+        reapplySettings: Bool,
+        generation: UInt64
+    ) async -> Bool {
         guard nativeHIDProbeEnabled else {
             hidppStatusText = "未启用"
             return false
         }
-        guard let device = LogitechDeviceInventory.preferredHIDPPInterface(
+        let candidates = LogitechDeviceInventory.hidppInterfaces(
             from: detectedLogitechDevices
-        ) else {
+        )
+        guard !candidates.isEmpty else {
             clearHIDPPConnection(status: "等待 HID++ 接口")
             return false
         }
 
         hidppStatusText = "正在探测设备…"
-        let detectedIdentity = await deviceDiscovery.identify(device)
-        guard !Task.isCancelled else { return false }
-        guard let identity = detectedIdentity else {
+        var detectedDeviceAndIdentity: (LogitechHIDDevice, HIDPPDeviceIdentity)?
+        for candidate in candidates {
+            let identity = await deviceDiscovery.identify(candidate)
+            guard isCurrentHIDProbe(generation) else { return false }
+            if let identity {
+                detectedDeviceAndIdentity = (candidate, identity)
+                break
+            }
+        }
+        guard let (device, identity) = detectedDeviceAndIdentity else {
             clearHIDPPConnection(status: "未在接收器中找到兼容鼠标")
             applyDetectedDevices(detectedLogitechDevices)
             return false
         }
         let controller = await deviceDiscovery.controller(for: device, identity: identity)
-        guard !Task.isCancelled else { return false }
+        guard isCurrentHIDProbe(generation) else { return false }
 
         specialButtonTask?.cancel()
         specialButtonTask = nil
         hidppIdentity = identity
         hidppController = controller
+        hidppControllerGeneration = controller == nil ? nil : generation
         mouseConnected = true
         deviceName = identity.name
         deviceTransport = device.transport
@@ -1504,9 +1738,11 @@ final class WorkspaceModel {
             return false
         }
 
-        hidppControls = await hidppController.readReprogrammableControls(
+        let controls = await hidppController.readReprogrammableControls(
             timeout: .milliseconds(500)
         )
+        guard isCurrentHIDProbe(generation) else { return false }
+        hidppControls = controls
         if !availableButtons.contains(selectedButton) {
             selectedButton = availableButtons.first ?? .back
         }
@@ -1515,27 +1751,33 @@ final class WorkspaceModel {
         if reapplySettings {
             settingsRestored = await restoreHIDPPSettings(
                 using: hidppController,
-                identity: identity
+                identity: identity,
+                generation: generation
             )
+            guard isCurrentHIDProbe(generation) else { return false }
         } else {
             settingsRestored = true
             let state = await hidppController.readState(timeout: .milliseconds(700))
+            guard isCurrentHIDProbe(generation) else { return false }
             applyHIDPPState(state)
             if wheelInversionBackend == .macOS {
                 try? await hidppController.setVerticalScrollInverted(
                     false,
                     timeout: .seconds(2)
                 )
+                guard isCurrentHIDProbe(generation) else { return false }
                 try? await hidppController.setHorizontalScrollInverted(
                     false,
                     timeout: .seconds(2)
                 )
+                guard isCurrentHIDProbe(generation) else { return false }
                 synchronizeEventTap()
             }
             hidppStatusText = identity.deviceIndex == 0xFF
                 ? "已连接 · 蓝牙直连"
                 : "已连接 · 接收器槽位 \(identity.deviceIndex)"
         }
+        guard isCurrentHIDProbe(generation) else { return false }
         startBatteryMonitoring(using: hidppController)
         launchSpecialButtonStream()
         return settingsRestored
@@ -1543,6 +1785,7 @@ final class WorkspaceModel {
 
     private func launchHIDProbe(reapplySettings: Bool = false) {
         hidProbeTask?.cancel()
+        let generation = beginHIDProbeGeneration()
         hidProbeTask = Task { [weak self] in
             guard let self else { return }
             if reapplySettings {
@@ -1550,12 +1793,25 @@ final class WorkspaceModel {
                     self.finishHIDWakeRecovery()
                 }
             } else {
-                await self.refreshHIDPPIdentity()
+                _ = await self.refreshHIDPPIdentity(
+                    reapplySettings: false,
+                    generation: generation
+                )
             }
         }
     }
 
+    private func beginHIDProbeGeneration() -> UInt64 {
+        hidProbeGeneration &+= 1
+        return hidProbeGeneration
+    }
+
+    private func isCurrentHIDProbe(_ generation: UInt64) -> Bool {
+        !Task.isCancelled && generation == hidProbeGeneration
+    }
+
     private func clearHIDPPConnection(status: String) {
+        _ = beginHIDProbeGeneration()
         batteryMonitorTask?.cancel()
         batteryMonitorTask = nil
         specialButtonTask?.cancel()
@@ -1565,6 +1821,7 @@ final class WorkspaceModel {
         }
         pendingHIDWrites.removeAll()
         hidppController = nil
+        hidppControllerGeneration = nil
         hidppIdentity = nil
         hidppControls = []
         hidppStatusText = status
@@ -1627,7 +1884,8 @@ final class WorkspaceModel {
 
     private func restoreHIDPPSettings(
         using controller: any HIDPPDeviceControlling,
-        identity: HIDPPDeviceIdentity
+        identity: HIDPPDeviceIdentity,
+        generation: UInt64
     ) async -> Bool {
         var failureCount = 0
 
@@ -1637,6 +1895,7 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
         if identity.featureIndexes[.smartShiftEnhanced] != nil ||
             identity.featureIndexes[.smartShift] != nil
@@ -1652,6 +1911,7 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
         if identity.featureIndexes[.highResolutionWheelEnhanced] != nil {
             do {
@@ -1662,6 +1922,7 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
         if identity.featureIndexes[.thumbWheel] != nil {
             do {
@@ -1672,6 +1933,7 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
         if identity.featureIndexes[.haptic] != nil, hapticsEnabled {
             do {
@@ -1682,6 +1944,7 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
         if identity.featureIndexes[.forceSensing] != nil, hasConfiguredForceSensitivity {
             do {
@@ -1692,8 +1955,10 @@ final class WorkspaceModel {
             } catch {
                 failureCount += 1
             }
+            guard isCurrentHIDProbe(generation) else { return false }
         }
 
+        guard isCurrentHIDProbe(generation) else { return false }
         hidppStatusText = failureCount == 0
             ? "已恢复设备设置"
             : "部分设备设置恢复失败（\(failureCount)）"
@@ -1843,6 +2108,16 @@ final class WorkspaceModel {
             for: .didWake,
             using: { [weak self] _ in
                 self?.handleSessionRecoverySignal(.wake)
+            }
+        ))
+        screenWakeObserver = ObserverTokenBox(center.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: workspace,
+            queue: .main,
+            using: { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.handleSessionRecoverySignal(.screenWake)
+                }
             }
         ))
         workspaceObservationTokens.append(center.addObserver(
@@ -2436,30 +2711,13 @@ final class WorkspaceModel {
         specialButtonTask?.cancel()
         specialButtonTask = nil
         guard remappingEnabled, nativeHIDProbeEnabled, let hidppController else { return }
-        let specialButtons = Set(availableButtons).intersection([
-            .modeShift, .gesture, .actionsRing, .dpiSwitch,
-        ])
-        let mappedButtons = Set((selectedProfile?.mappings ?? []).compactMap { mapping in
-            specialButtons.contains(mapping.button) &&
-                mapping.actionID != MouserAction.passThrough.rawValue
-                ? mapping.button
-                : nil
-        })
+        let configuration = specialInputConfiguration()
+        let mappedButtons = configuration.mappedButtons
+        let rawXYButtons = configuration.rawXYButtons
+        let ringButtons = configuration.ringButtons
+        let nativeGestureButtons = configuration.nativeGestureButtons
+        let externalGestureButtons = configuration.externalGestureButtons
         guard !mappedButtons.isEmpty else { return }
-        let ringButtons = Set(mappedButtons.filter { button in
-            self.selectedProfile?.mappingValue(for: button.configID) ==
-                MouserAction.activateActionsRing.rawValue
-        })
-        let nativeGestureButtons = Set(mappedButtons.filter { button in
-            (button == .gesture || button == .actionsRing) &&
-                self.selectedProfile?.mappingValue(for: button.configID) == "gesture_swipe"
-        })
-        let externalGestureButtons = Set(mappedButtons.filter { button in
-            button == .modeShift &&
-                self.selectedProfile?.mappingValue(for: button.configID) == "gesture_swipe"
-        })
-        var rawXYButtons = nativeGestureButtons
-        rawXYButtons.formUnion(ringButtons)
         let recognizerSettings = GestureRecognitionSettings(
             threshold: gestureThreshold,
             commitWindowMilliseconds: gestureCommitWindowMilliseconds,
@@ -2575,6 +2833,41 @@ final class WorkspaceModel {
         }
     }
 
+    private func specialInputConfiguration() -> HIDPPSpecialInputConfiguration {
+        guard remappingEnabled, nativeHIDProbeEnabled else { return .empty }
+        let specialButtons = Set(availableButtons).intersection([
+            .modeShift, .gesture, .actionsRing, .dpiSwitch,
+        ])
+        let mappedButtons = Set((selectedProfile?.mappings ?? []).compactMap { mapping in
+            specialButtons.contains(mapping.button) &&
+                mapping.actionID != MouserAction.passThrough.rawValue
+                ? mapping.button
+                : nil
+        })
+        guard !mappedButtons.isEmpty else { return .empty }
+        let ringButtons = Set(mappedButtons.filter { button in
+            self.selectedProfile?.mappingValue(for: button.configID) ==
+                MouserAction.activateActionsRing.rawValue
+        })
+        let nativeGestureButtons = Set(mappedButtons.filter { button in
+            (button == .gesture || button == .actionsRing) &&
+                self.selectedProfile?.mappingValue(for: button.configID) == "gesture_swipe"
+        })
+        let externalGestureButtons = Set(mappedButtons.filter { button in
+            button == .modeShift &&
+                self.selectedProfile?.mappingValue(for: button.configID) == "gesture_swipe"
+        })
+        var rawXYButtons = nativeGestureButtons
+        rawXYButtons.formUnion(ringButtons)
+        return HIDPPSpecialInputConfiguration(
+            mappedButtons: mappedButtons,
+            rawXYButtons: rawXYButtons,
+            ringButtons: ringButtons,
+            nativeGestureButtons: nativeGestureButtons,
+            externalGestureButtons: externalGestureButtons
+        )
+    }
+
     private func synchronizeEventTap() {
         updateEventTapSettings()
         if accessibilityGranted, requiresEventTap {
@@ -2616,8 +2909,9 @@ final class WorkspaceModel {
         for task in recoveryTasks {
             task.cancel()
         }
-        recoveryTasks = delays.map { [weak self] delay in
-            Task {
+        let recoveryTask = Task { [weak self] in
+            let waits = SessionRecoveryPlanner.interAttemptWaits(for: delays)
+            for delay in waits {
                 do {
                     if delay > .zero {
                         try await Task.sleep(for: delay)
@@ -2633,6 +2927,7 @@ final class WorkspaceModel {
                        await self.attemptHIDWakeRecovery()
                     {
                         self.finishHIDWakeRecovery()
+                        return
                     }
                 } catch is CancellationError {
                     return
@@ -2641,6 +2936,7 @@ final class WorkspaceModel {
                 }
             }
         }
+        recoveryTasks = [recoveryTask]
     }
 
     private func handleDeviceActivityForRecovery() {
@@ -2674,15 +2970,24 @@ final class WorkspaceModel {
     }
 
     private func checkHIDPPSettingsHealthAfterActivity() async {
+        let generation = hidProbeGeneration
         guard let hidppController, let hidppIdentity else {
             awaitingHIDWakeRecovery = true
             recoveryPlanner.armHIDSettingsRestore()
             synchronizeEventTap()
             return
         }
+        guard hidppControllerGeneration == generation else { return }
 
+        let specialInput = specialInputConfiguration()
         let state = await hidppController.readState(timeout: .milliseconds(700))
-        guard !Task.isCancelled else { return }
+        let specialInputReporting = await hidppController.readSpecialInputReporting(
+            for: specialInput.mappedButtons,
+            timeout: .milliseconds(700)
+        )
+        guard isCurrentHIDProbe(generation),
+              hidppControllerGeneration == generation
+        else { return }
         let health = HIDPPSettingsHealthEvaluator.evaluate(
             state,
             identity: hidppIdentity,
@@ -2692,8 +2997,14 @@ final class WorkspaceModel {
             smartShiftThreshold: Int(smartShiftThreshold),
             scrollForce: Int(scrollForce),
             invertVerticalScroll: invertVerticalScroll,
+            invertHorizontalScroll: invertHorizontalScroll,
             wheelInversionBackend: wheelInversionBackend,
-            forceSensitivity: hasConfiguredForceSensitivity ? Int(forceSensitivity) : nil
+            hapticsEnabled: hapticsEnabled,
+            hapticStrength: Int(hapticStrength),
+            forceSensitivity: hasConfiguredForceSensitivity ? Int(forceSensitivity) : nil,
+            specialInputButtons: specialInput.mappedButtons,
+            rawXYButtons: specialInput.rawXYButtons,
+            specialInputReporting: specialInputReporting
         )
 
         switch health {
@@ -2738,6 +3049,7 @@ final class WorkspaceModel {
     ) {
         guard let configStore else { return }
         pendingWrites[key]?.cancel()
+        let generation = beginConfigurationWrite(key: key)
         pendingWrites[key] = Task { [weak self] in
             do {
                 if delay != .zero {
@@ -2747,12 +3059,47 @@ final class WorkspaceModel {
                 try await configStore.update(mutation)
                 guard !Task.isCancelled else { return }
                 self?.configurationLoaded = true
-                self?.configurationStatus = "更改已保存"
+                self?.finishConfigurationWrite(key: key, generation: generation)
             } catch is CancellationError {
                 return
             } catch {
-                self?.configurationStatus = "保存失败：\(error.localizedDescription)"
+                self?.finishConfigurationWrite(
+                    key: key,
+                    generation: generation,
+                    error: error.localizedDescription
+                )
             }
+        }
+    }
+
+    private func beginConfigurationWrite(key: String) -> Int {
+        let generation = configurationWriteTracker.begin(key: key)
+        configurationStatus = "正在保存更改…"
+        configurationPersistenceState = .saving
+        return generation
+    }
+
+    private func finishConfigurationWrite(
+        key: String,
+        generation: Int,
+        error: String? = nil
+    ) {
+        guard configurationWriteTracker.finish(
+            key: key,
+            generation: generation,
+            error: error
+        ) else { return }
+
+        guard !configurationWriteTracker.isSaving else {
+            configurationPersistenceState = .saving
+            return
+        }
+        if let failureMessage = configurationWriteTracker.failureMessage {
+            configurationStatus = "保存失败：\(failureMessage)"
+            configurationPersistenceState = .failed(configurationStatus)
+        } else {
+            configurationStatus = "更改已保存"
+            configurationPersistenceState = .saved(configurationStatus)
         }
     }
 

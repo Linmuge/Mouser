@@ -33,7 +33,7 @@ struct HIDPPProtocolTests {
 
     @Test("HID++ errors expose their protocol error code")
     func decodesErrorResponse() throws {
-        let response = try HIDPPCodec.decodeResponse([0x11, 0x01, 0xFF, 0x0A, 0x05, 0x07])
+        let response = try HIDPPCodec.decodeResponse([0x11, 0x01, 0xFF, 0x05, 0x3A, 0x07])
 
         #expect(response.isError)
         #expect(response.errorCode == 0x07)
@@ -111,6 +111,29 @@ struct HIDPPProtocolTests {
         #expect(HIDPPCommands.readBattery(featureIndex: 0x0C, unified: false).function == 0x00)
         #expect(HIDPPCommands.parseBattery(parameters: [82, 0, 1]) == .init(level: 82, charging: true))
         #expect(HIDPPCommands.parseBattery(parameters: [101, 0, 0]) == nil)
+    }
+
+    @Test("thumb wheel and haptic getters decode the current firmware state")
+    func parsesThumbWheelAndHapticState() {
+        #expect(
+            HIDPPCommands.readThumbWheelStatus(featureIndex: 0x0A) ==
+                HIDPPCommand(featureIndex: 0x0A, function: 0x01, parameters: [])
+        )
+        #expect(HIDPPCommands.parseThumbWheelInversion(parameters: [0x00, 0x01]) == true)
+        #expect(HIDPPCommands.parseThumbWheelInversion(parameters: [0x00]) == nil)
+        #expect(
+            HIDPPCommands.readHapticState(featureIndex: 0x0B) ==
+                HIDPPCommand(featureIndex: 0x0B, function: 0x01, parameters: [])
+        )
+        #expect(
+            HIDPPCommands.parseHapticState(parameters: [0x01, 75, 0x01]) ==
+                HIDPPHapticState(enabled: true, deviceLevel: 75)
+        )
+        #expect(
+            HIDPPCommands.parseHapticState(parameters: [0x00, 50, 0x01]) ==
+                HIDPPHapticState(enabled: false, deviceLevel: 50)
+        )
+        #expect(HIDPPCommands.parseHapticState(parameters: [0x01, 101]) == nil)
     }
 
     @Test("device state parsers decode DPI and SmartShift without guessing missing bytes")

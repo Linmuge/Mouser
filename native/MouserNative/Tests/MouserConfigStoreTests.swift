@@ -146,8 +146,8 @@ struct MouserConfigStoreTests {
         #expect(finder.actionsRingSlots == ["copy", "paste", "mission_control", "show_desktop"])
     }
 
-    @Test("startup settings retain Python defaults when absent")
-    func startupSettingsUsePythonDefaults() throws {
+    @Test("startup settings use safe defaults when absent")
+    func startupSettingsUseSafeDefaults() throws {
         let root = try JSONDecoder().decode(
             JSONValue.self,
             from: Data("{\"version\":11,\"profiles\":{},\"settings\":{}}".utf8)
@@ -155,7 +155,7 @@ struct MouserConfigStoreTests {
 
         let snapshot = try MouserConfigurationSnapshot(root: root)
 
-        #expect(snapshot.startMinimized)
+        #expect(!snapshot.startMinimized)
         #expect(!snapshot.startAtLogin)
         #expect(snapshot.checkForUpdates)
         #expect(!snapshot.debugMode)
@@ -163,6 +163,140 @@ struct MouserConfigStoreTests {
         #expect(snapshot.screenshotDirectory.isEmpty)
         #expect(snapshot.wheelInversionBackend == .automatic)
         #expect(snapshot.language == .english)
+    }
+
+    @Test("successful retry clears only its keyed save failure")
+    func successfulRetryClearsOnlyItsFailure() {
+        var tracker = ConfigurationWriteStateTracker()
+        let firstA = tracker.begin(key: "setting.a")
+        let firstB = tracker.begin(key: "setting.b")
+
+        let finishedFirstA = tracker.finish(key: "setting.a", generation: firstA, error: "A failed")
+        let finishedFirstB = tracker.finish(key: "setting.b", generation: firstB, error: "B failed")
+        #expect(finishedFirstA)
+        #expect(finishedFirstB)
+        #expect(tracker.failureMessage == "A failed")
+
+        let retryA = tracker.begin(key: "setting.a")
+        #expect(tracker.isSaving)
+        let finishedRetryA = tracker.finish(key: "setting.a", generation: retryA)
+        #expect(finishedRetryA)
+        #expect(!tracker.isSaving)
+        #expect(tracker.failureMessage == "B failed")
+
+        let retryB = tracker.begin(key: "setting.b")
+        let finishedRetryB = tracker.finish(key: "setting.b", generation: retryB)
+        #expect(finishedRetryB)
+        #expect(tracker.failureMessage == nil)
+    }
+
+    @Test("stale save completion cannot restore an older generation error")
+    func staleSaveCompletionIsIgnored() {
+        var tracker = ConfigurationWriteStateTracker()
+        let stale = tracker.begin(key: "setting.dpi")
+        let latest = tracker.begin(key: "setting.dpi")
+
+        let finishedStale = tracker.finish(key: "setting.dpi", generation: stale, error: "stale")
+        let finishedLatest = tracker.finish(key: "setting.dpi", generation: latest)
+        #expect(!finishedStale)
+        #expect(finishedLatest)
+        #expect(!tracker.isSaving)
+        #expect(tracker.failureMessage == nil)
+    }
+
+    @Test("first load creates a secure default configuration and visible startup")
+    @MainActor
+    func firstLoadCreatesSecureDefaults() async throws {
+        let fixture = try TemporaryConfigFixture()
+        let store = MouserConfigStore(fileURL: fixture.fileURL)
+
+        let result = try await store.loadWithDisposition()
+
+        #expect(result.disposition == .created)
+        #expect(result.snapshot.activeProfileID == "default")
+        #expect(!result.snapshot.startMinimized)
+        #expect(result.snapshot.gestureThreshold == 25)
+        #expect(result.snapshot.profiles.map(\.id) == ["default"])
+        #expect(FileManager.default.fileExists(atPath: fixture.fileURL.path(percentEncoded: false)))
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: fixture.fileURL.path(percentEncoded: false)
+        )[.posixPermissions] as? NSNumber
+        #expect(permissions?.intValue == 0o600)
+
+        let firstRunFixture = try TemporaryConfigFixture()
+        let model = WorkspaceModel.live(
+            configStore: MouserConfigStore(fileURL: firstRunFixture.fileURL),
+            accessibilityAuthorizer: ConfigTestAccessibilityAuthorizer()
+        )
+        await model.loadConfiguration()
+        #expect(model.configurationLoaded)
+        #expect(!model.shouldStartMinimizedAfterBootstrap)
+        #expect(model.shouldPresentSettingsAfterBootstrap)
+        #expect(model.configurationPersistenceState == .saved("已创建默认配置"))
+    }
+
+    @Test("corrupt configuration is secured as a backup before defaults replace it")
+    func corruptConfigurationIsBackedUpBeforeRecovery() async throws {
+        let fixture = try TemporaryConfigFixture(json: "{ definitely-not-json")
+        let original = try Data(contentsOf: fixture.fileURL)
+        let store = MouserConfigStore(fileURL: fixture.fileURL)
+
+        let result = try await store.loadWithDisposition()
+
+        guard case let .recovered(backupFileName) = result.disposition else {
+            Issue.record("Expected corrupt configuration recovery")
+            return
+        }
+        let backupURL = fixture.directoryURL.appending(path: backupFileName)
+        #expect(try Data(contentsOf: backupURL) == original)
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: backupURL.path(percentEncoded: false)
+        )[.posixPermissions] as? NSNumber
+        #expect(permissions?.intValue == 0o600)
+        #expect(!result.snapshot.startMinimized)
+        #expect(try await store.loadWithDisposition().disposition == .existing)
+    }
+
+    @Test("structurally invalid writable containers use the same recovery path")
+    func structurallyInvalidConfigurationIsRecovered() async throws {
+        let fixture = try TemporaryConfigFixture(
+            json: "{\"version\":11,\"profiles\":{},\"settings\":[]}"
+        )
+        let store = MouserConfigStore(fileURL: fixture.fileURL)
+
+        let result = try await store.loadWithDisposition()
+
+        guard case let .recovered(backupFileName) = result.disposition else {
+            Issue.record("Expected structural configuration recovery")
+            return
+        }
+        #expect(
+            FileManager.default.fileExists(
+                atPath: fixture.directoryURL.appending(path: backupFileName).path(percentEncoded: false)
+            )
+        )
+        #expect(result.snapshot.profiles.map(\.id) == ["default"])
+    }
+
+    @Test("only an existing explicit setting may minimize startup")
+    @MainActor
+    func explicitExistingSettingMayMinimizeStartup() async throws {
+        let fixture = try TemporaryConfigFixture(
+            json: existingConfigFixture.replacingOccurrences(
+                of: "\"start_minimized\": false",
+                with: "\"start_minimized\": true"
+            )
+        )
+        let model = WorkspaceModel.live(
+            configStore: MouserConfigStore(fileURL: fixture.fileURL),
+            accessibilityAuthorizer: ConfigTestAccessibilityAuthorizer()
+        )
+
+        await model.loadConfiguration()
+
+        #expect(model.startMinimized)
+        #expect(model.shouldStartMinimizedAfterBootstrap)
+        #expect(!model.shouldPresentSettingsAfterBootstrap)
     }
 
     @Test("loads an enabled login item setting")
@@ -193,6 +327,14 @@ struct MouserConfigStoreTests {
                 "安裝失敗：簽章無效"
         )
         #expect(
+            AppLanguage.english.localizedRuntime("上次更新失败：签名无效") ==
+                "Previous Update Failed: Invalid Signature"
+        )
+        #expect(
+            AppLanguage.traditionalChinese.localizedRuntime("上次更新失败：签名无效") ==
+                "上次更新失敗：簽章無效"
+        )
+        #expect(
             AppLanguage.english.localizedRuntime(
                 "写入临时配置失败（config.json）：磁盘已满"
             ) == "Failed to Write Temporary Configuration (config.json): 磁盘已满"
@@ -200,6 +342,18 @@ struct MouserConfigStoreTests {
         #expect(
             AppLanguage.english.localized("修改会自动保存到当前应用配置。") ==
                 "Changes are saved automatically to the current app profile."
+        )
+        #expect(AppLanguage.english.localized("详细设置…") == "Detailed Settings…")
+        #expect(AppLanguage.traditionalChinese.localized("详细设置…") == "詳細設定…")
+        #expect(
+            AppLanguage.english.localized(
+                "Mouser 会验证摘要和发行者签名，然后替换应用并自动重新打开。"
+            ) == "Mouser verifies the digest and publisher signature, then replaces the app and reopens it automatically."
+        )
+        #expect(
+            AppLanguage.traditionalChinese.localized(
+                "Mouser 会验证摘要和发行者签名，然后替换应用并自动重新打开。"
+            ) == "Mouser 會驗證摘要與發行者簽章，然後取代應用程式並自動重新開啟。"
         )
     }
 
@@ -300,7 +454,10 @@ struct MouserConfigStoreTests {
 
         model.dpi = 1750
         model.language = .english
+        #expect(model.configurationPersistenceState == .saving)
         await model.flushPendingWrites()
+
+        #expect(model.configurationPersistenceState == .saved("更改已保存"))
 
         let snapshot = try await store.load()
         #expect(snapshot.dpi == 1750)
@@ -318,11 +475,13 @@ private struct TemporaryConfigFixture {
     let directoryURL: URL
     let fileURL: URL
 
-    init(json: String) throws {
+    init(json: String? = nil) throws {
         directoryURL = FileManager.default.temporaryDirectory
             .appending(path: "Mouser Native Tests-\(UUID().uuidString)", directoryHint: .isDirectory)
         fileURL = directoryURL.appending(path: "config.json", directoryHint: .notDirectory)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        try Data(json.utf8).write(to: fileURL, options: .atomic)
+        if let json {
+            try Data(json.utf8).write(to: fileURL, options: .atomic)
+        }
     }
 }

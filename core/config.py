@@ -264,7 +264,9 @@ DEFAULT_CONFIG = {
         }
     },
     "settings": {
-        "start_minimized": True,
+        # First launch must present setup and permission state. Existing users
+        # who explicitly enabled this option retain their saved true value.
+        "start_minimized": False,
         "start_at_login": False,
         "hscroll_threshold": 0.1,
         "invert_hscroll": False,  # swap horizontal scroll directions
@@ -344,21 +346,61 @@ def ensure_config_dir():
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
 
 
+class _ConfigCorruptionError(ValueError):
+    """Raised only for malformed on-disk JSON/config structure."""
+
+
+def _backup_corrupt_config(raw_bytes):
+    """Create a unique, owner-only byte-for-byte backup of a bad config."""
+    target_path = os.path.realpath(CONFIG_FILE)
+    target_dir = os.path.dirname(target_path) or CONFIG_DIR
+    prefix = f"{os.path.basename(target_path)}.corrupt-"
+    fd, backup_path = tempfile.mkstemp(
+        prefix=prefix,
+        suffix=".bak",
+        dir=target_dir,
+    )
+    try:
+        with os.fdopen(fd, "wb") as backup_file:
+            backup_file.write(raw_bytes)
+            backup_file.flush()
+            os.fsync(backup_file.fileno())
+        os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR)
+        return backup_path
+    except BaseException:
+        try:
+            os.unlink(backup_path)
+        except OSError:
+            pass
+        raise
+
+
 def load_config():
     """Load config from disk, or return defaults if none exists."""
     ensure_config_dir()
-    if os.path.exists(CONFIG_FILE):
+    try:
+        with open(CONFIG_FILE, "rb") as config_file:
+            raw_bytes = config_file.read()
+    except FileNotFoundError:
+        return json.loads(json.dumps(DEFAULT_CONFIG))
+
+    try:
+        cfg = json.loads(raw_bytes.decode("utf-8"))
+        if not isinstance(cfg, dict):
+            raise _ConfigCorruptionError("config root must be an object")
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            # Merge any missing keys from default
             cfg = _migrate(cfg)
             cfg = _merge_defaults(cfg, DEFAULT_CONFIG)
             cfg = _validate_types(cfg, DEFAULT_CONFIG)
-            return cfg
-        except Exception as e:
-            print(f"[Config] Error loading config: {e}")
-    return json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise _ConfigCorruptionError("config structure is invalid") from exc
+        return cfg
+    except (UnicodeDecodeError, json.JSONDecodeError, _ConfigCorruptionError) as exc:
+        backup_path = _backup_corrupt_config(raw_bytes)
+        recovered = json.loads(json.dumps(DEFAULT_CONFIG))
+        _atomic_write_json(CONFIG_FILE, recovered)
+        print(f"[Config] Recovered malformed config; backup: {backup_path}: {exc}")
+        return recovered
 
 
 def _atomic_write_json(path, obj):

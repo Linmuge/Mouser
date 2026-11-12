@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
+REPOSITORY_ROOT="${SCRIPT_DIR:h:h}"
 PROJECT="$SCRIPT_DIR/MouserNative.xcodeproj"
 SCHEME="MouserNative"
 VERSION="${MOUSER_VERSION:-4.0.1}"
@@ -10,7 +11,7 @@ BUILD_NUMBER="${MOUSER_BUILD_NUMBER:-1}"
 SIGN_IDENTITY="${MOUSER_SIGN_IDENTITY:?请通过环境变量提供 Developer ID Application 签名身份}"
 DEVELOPMENT_TEAM="${MOUSER_DEVELOPMENT_TEAM:-99M5SZBF38}"
 NOTARY_PROFILE="${MOUSER_NOTARY_PROFILE:-Mouser-Notary}"
-OUTPUT_DIR="${MOUSER_OUTPUT_DIR:-$SCRIPT_DIR/release-$VERSION}"
+OUTPUT_DIR="${MOUSER_OUTPUT_DIR:-$REPOSITORY_ROOT/build/native-release-$VERSION}"
 NOTARIZE=1
 
 if [[ "${1:-}" == "--skip-notarization" ]]; then

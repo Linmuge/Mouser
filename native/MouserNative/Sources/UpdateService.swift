@@ -11,6 +11,9 @@ struct MouserReleaseAsset: Equatable, Sendable {
     var isVerifiedDMG: Bool {
         name.lowercased().hasSuffix(".dmg") &&
             !name.lowercased().contains("debug") &&
+            name == URL(filePath: name).lastPathComponent &&
+            !name.contains("/") &&
+            !name.contains("\\") &&
             size > 0 &&
             sha256?.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
     }
@@ -25,7 +28,15 @@ struct MouserRelease: Equatable, Sendable {
     var assets: [MouserReleaseAsset] = []
 
     var installAsset: MouserReleaseAsset? {
-        assets.first(where: \.isVerifiedDMG)
+        let expectedName = "Mouser-\(version).dmg"
+        let expectedPath = "/Linmuge/Mouser/releases/download/v\(version)/\(expectedName)"
+        return assets.first { asset in
+            asset.isVerifiedDMG &&
+                asset.name == expectedName &&
+                asset.downloadURL.scheme == "https" &&
+                asset.downloadURL.host() == "github.com" &&
+                asset.downloadURL.path() == expectedPath
+        }
     }
 }
 

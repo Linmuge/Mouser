@@ -25,6 +25,13 @@ class MainQmlShortcutGuardTests(unittest.TestCase):
             3,
         )
 
+    def test_capability_loss_returns_from_a_removed_dynamic_page(self):
+        self.assertIn("function ensureCurrentPageAvailable()", MAIN_QML)
+        self.assertIn("function onHapticSupportedChanged()", MAIN_QML)
+        self.assertIn("function onDeviceHasActionsRingChanged()", MAIN_QML)
+        self.assertIn("function onActionsRingActiveChanged()", MAIN_QML)
+        self.assertGreaterEqual(MAIN_QML.count("root.ensureCurrentPageAvailable()"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

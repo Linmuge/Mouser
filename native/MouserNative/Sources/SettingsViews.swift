@@ -75,7 +75,7 @@ private struct PointerSpeedSection: View {
                 .foregroundStyle(.tertiary)
             }
             .padding(16)
-            Divider().padding(.leading, 16)
+            MouserHairline()
             VStack(alignment: .leading, spacing: 12) {
                 Text("DPI 切换预设")
                     .font(.subheadline.weight(.medium))
@@ -114,7 +114,7 @@ private struct ScrollWheelSection: View {
             SettingRow(title: "SmartShift", detail: "快速滚动时自动进入飞轮") {
                 Toggle("SmartShift", isOn: $model.smartShiftEnabled)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "关闭 SmartShift 后", detail: "选择固定的机械滚轮模式") {
                 Picker("固定滚轮模式", selection: $model.smartShiftMode) {
                     ForEach(SmartShiftMode.allCases) { mode in
@@ -125,7 +125,7 @@ private struct ScrollWheelSection: View {
                 .frame(width: 180)
                 .disabled(model.smartShiftEnabled)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "切换阈值", detail: "数值越小，越容易切换到飞轮") {
                 HStack(spacing: 10) {
                     Slider(value: $model.smartShiftThreshold, in: 1...50, step: 1)
@@ -136,7 +136,7 @@ private struct ScrollWheelSection: View {
                 }
                 .disabled(!model.smartShiftEnabled)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "棘轮力度", detail: "仅增强版 SmartShift 设备支持") {
                 HStack(spacing: 10) {
                     Slider(value: $model.scrollForce, in: 1...100, step: 1)
@@ -168,19 +168,19 @@ private struct ScrollDirectionSection: View {
                 }
                 .frame(width: 210)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "反转垂直滚动") {
                 Toggle("反转垂直滚动", isOn: $model.invertVerticalScroll)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "反转水平滚动") {
                 Toggle("反转水平滚动", isOn: $model.invertHorizontalScroll)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "忽略触控板") {
                 Toggle("忽略触控板", isOn: $model.ignoreTrackpad)
             }
-            Divider().padding(.leading, 16)
+            MouserHairline()
             SettingRow(title: "水平滚轮触发阈值", detail: "数值越小，拇指滚轮动作越灵敏") {
                 HStack(spacing: 10) {
                     Slider(value: $model.horizontalScrollThreshold, in: 0.05...1, step: 0.05)
@@ -206,7 +206,7 @@ struct HapticsView: View {
                 SettingRow(title: "启用触觉反馈", detail: "仅支持 MX Master 4 等兼容设备") {
                     Toggle("启用触觉反馈", isOn: $model.hapticsEnabled)
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "反馈强度") {
                     Picker("反馈强度", selection: $model.hapticStrength) {
                         Text("轻柔").tag(0.0)
@@ -245,7 +245,7 @@ struct HapticsView: View {
                     }
                     .disabled(!model.hapticsEnabled)
                     if index < WorkspaceModel.hapticEligibleActions.count - 1 {
-                        Divider().padding(.leading, 16)
+                        MouserHairline()
                     }
                 }
             }
@@ -266,7 +266,7 @@ struct HapticsView: View {
                     }
                     .disabled(!model.hapticsEnabled)
                     if index < model.availableButtons.count - 1 {
-                        Divider().padding(.leading, 16)
+                        MouserHairline()
                     }
                 }
             }
@@ -315,6 +315,12 @@ struct ActionsRingSettingsView: View {
             title: "操作环",
             subtitle: "按住 MX Master 4 感应区并滑向一个方向，释放即可执行。"
         ) {
+            ActionsRingDiagram(model: model)
+                .frame(height: 330)
+                .frame(maxWidth: .infinity)
+                .mouserCard(cornerRadius: MouserStyle.radiusPanel)
+                .mouserReveal(delay: 0.02)
+
             SettingsGroup("交互") {
                 SettingRow(title: "按住时间", detail: "快速轻按会以可点击模式打开操作环") {
                     HStack(spacing: 10) {
@@ -322,14 +328,15 @@ struct ActionsRingSettingsView: View {
                             .frame(width: 170)
                         Text("\(Int(model.actionsRingHoldMilliseconds)) ms")
                             .monospacedDigit()
+                            .font(.system(size: 12))
                             .frame(width: 64, alignment: .trailing)
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "所有应用使用同一组动作") {
                     Toggle("所有应用使用同一组动作", isOn: $model.actionsRingUsesGlobalSlots)
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(
                     title: "切换选区时播放反馈",
                     detail: "需要启用触觉反馈并使用兼容设备"
@@ -355,22 +362,29 @@ struct ActionsRingSettingsView: View {
                             count: model.actionsRingSlots.count
                         )
                     ) {
-                        ActionPicker(
-                            title: model.formatted("位置 %@", String(index + 1)),
-                            selection: Binding(
-                                get: {
-                                    guard model.actionsRingSlots.indices.contains(index) else {
-                                        return MouserAction.passThrough.rawValue
-                                    }
-                                    return model.actionsRingSlots[index]
-                                },
-                                set: { model.setActionsRingSlot($0, at: index) }
+                        HStack(spacing: 10) {
+                            if model.selectedActionsRingIndex == index {
+                                Circle()
+                                    .fill(MouserStyle.accent)
+                                    .frame(width: 6, height: 6)
+                            }
+                            ActionPicker(
+                                title: model.formatted("位置 %@", String(index + 1)),
+                                selection: Binding(
+                                    get: {
+                                        guard model.actionsRingSlots.indices.contains(index) else {
+                                            return MouserAction.passThrough.rawValue
+                                        }
+                                        return model.actionsRingSlots[index]
+                                    },
+                                    set: { model.setActionsRingSlot($0, at: index) }
+                                )
                             )
-                        )
-                        .frame(width: 230)
+                            .frame(width: 230)
+                        }
                     }
                     if index < model.actionsRingSlots.count - 1 {
-                        Divider().padding(.leading, 16)
+                        MouserHairline()
                     }
                 }
             }
@@ -379,7 +393,7 @@ struct ActionsRingSettingsView: View {
                 "轻按打开后可点击选区；按住打开后移动拇指并释放。",
                 systemImage: "info.circle"
             )
-            .font(.callout)
+            .font(.system(size: 12))
             .foregroundStyle(.secondary)
         }
     }
@@ -389,6 +403,115 @@ struct ActionsRingSettingsView: View {
             return model.formatted("顺时针第 %@ 个选区", String(index + 1))
         }
         return model.localized(["上方", "右侧", "下方", "左侧"][index])
+    }
+}
+
+/// 可交互的环形选区图：点击选区与下方动作行保持同一个选中索引。
+private struct ActionsRingDiagram: View {
+    @Bindable var model: WorkspaceModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var slotCount: Int {
+        max(model.actionsRingSlots.count, 4)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            let ringDiameter = side - 96
+            let radius = ringDiameter / 2
+
+            ZStack {
+                Circle()
+                    .fill(
+                        AngularGradient(
+                            stops: gradientStops,
+                            center: .center,
+                            startAngle: .degrees(-90 - sectorAngle / 2),
+                            endAngle: .degrees(270 - sectorAngle / 2)
+                        )
+                    )
+                    .overlay { Circle().stroke(Color.primary.opacity(0.08), lineWidth: 1) }
+                    .frame(width: ringDiameter, height: ringDiameter)
+
+                VStack(spacing: 4) {
+                    Image(systemName: "circle.hexagongrid")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(MouserStyle.accent)
+                    Text(model.formatted("%@ 个选区", String(slotCount)))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+
+                ForEach(0..<slotCount, id: \.self) { index in
+                    let angle = -90.0 + sectorAngle * Double(index)
+                    let radians = angle * .pi / 180
+
+                    Button {
+                        withAnimation(reduceMotion ? nil : MouserMotion.selection) {
+                            model.selectedActionsRingIndex = index
+                        }
+                    } label: {
+                        Text(actionTitle(at: index))
+                            .font(.system(size: 11, weight: model.selectedActionsRingIndex == index ? .semibold : .regular))
+                            .lineLimit(1)
+                            .frame(width: 92, height: 28)
+                            .foregroundStyle(
+                                model.selectedActionsRingIndex == index ? .white : .primary
+                            )
+                            .background(
+                                model.selectedActionsRingIndex == index
+                                    ? MouserStyle.accent
+                                    : MouserStyle.cardBackground,
+                                in: Capsule()
+                            )
+                            .overlay {
+                                Capsule().strokeBorder(
+                                    model.selectedActionsRingIndex == index
+                                        ? Color.clear
+                                        : Color.primary.opacity(0.09),
+                                    lineWidth: 0.5
+                                )
+                            }
+                            .shadow(
+                                color: .black.opacity(model.selectedActionsRingIndex == index ? 0.18 : 0.08),
+                                radius: 6,
+                                y: 3
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .position(
+                        x: proxy.size.width / 2 + radius * cos(radians),
+                        y: proxy.size.height / 2 + radius * sin(radians)
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .animation(reduceMotion ? nil : MouserMotion.selection, value: model.selectedActionsRingIndex)
+    }
+
+    private var sectorAngle: Double {
+        360.0 / Double(slotCount)
+    }
+
+    private var gradientStops: [Gradient.Stop] {
+        (0...slotCount).map { step in
+            Gradient.Stop(
+                color: step.isMultiple(of: 2)
+                    ? MouserStyle.accent.opacity(0.10)
+                    : Color.primary.opacity(0.03),
+                location: Double(step) / Double(slotCount)
+            )
+        }
+    }
+
+    private func actionTitle(at index: Int) -> String {
+        let slots = model.actionsRingSlots
+        let actionID = slots.indices.contains(index)
+            ? slots[index]
+            : MouserAction.passThrough.rawValue
+        return model.localized(MouserAction(rawValue: actionID)?.title ?? "无动作")
     }
 }
 
@@ -447,7 +570,7 @@ struct ProfilesView: View {
                         }
                     }
                     if index < model.profiles.count - 1 {
-                        Divider().padding(.leading, 64)
+                        MouserHairline(leadingInset: 64)
                     }
                 }
             }
@@ -518,17 +641,24 @@ private struct ProfileApplicationIcon: View {
                 Image(nsImage: applicationIcon)
                     .resizable()
                     .scaledToFit()
-                    .padding(5)
+                    .padding(4)
             } else {
                 Image(systemName: profile.systemImage)
-                    .font(.title3)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(MouserStyle.accent)
             }
         }
-        .foregroundStyle(isSelected ? .white : MouserStyle.accent)
-        .frame(width: 36, height: 36)
+        .frame(width: 32, height: 32)
+        .overlay {
+            RoundedRectangle(cornerRadius: MouserStyle.radiusControl, style: .continuous)
+                .strokeBorder(
+                    isSelected ? MouserStyle.accent.opacity(0.35) : Color.primary.opacity(0.09),
+                    lineWidth: 0.5
+                )
+        }
         .background(
-            isSelected ? MouserStyle.accent : MouserStyle.accent.opacity(0.1),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            MouserStyle.accent.opacity(isSelected ? 0.14 : 0.08),
+            in: RoundedRectangle(cornerRadius: MouserStyle.radiusControl, style: .continuous)
         )
     }
 }
@@ -552,7 +682,7 @@ struct AdvancedView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 260)
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "界面语言", detail: "立即应用到窗口和菜单栏") {
                     Picker("界面语言", selection: $model.language) {
                         ForEach(AppLanguage.allCases) { language in
@@ -561,7 +691,7 @@ struct AdvancedView: View {
                     }
                     .frame(width: 180)
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(
                     title: "鼠标示意图",
                     detail: "识别错误时手动纠正外观；不会改变真实设备能力"
@@ -591,7 +721,7 @@ struct AdvancedView: View {
                             .frame(width: 52, alignment: .trailing)
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "识别窗口", detail: "完成一次方向动作的最长时间") {
                     HStack(spacing: 10) {
                         Slider(value: $model.gestureCommitWindowMilliseconds, in: 150...800, step: 10)
@@ -601,7 +731,7 @@ struct AdvancedView: View {
                             .frame(width: 62, alignment: .trailing)
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "转向停顿", detail: "停顿后允许识别新的方向") {
                     HStack(spacing: 10) {
                         Slider(value: $model.gestureSettleMilliseconds, in: 40...250, step: 5)
@@ -611,7 +741,7 @@ struct AdvancedView: View {
                             .frame(width: 62, alignment: .trailing)
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "斜向容差", detail: "越小越严格排除斜向移动") {
                     HStack(spacing: 10) {
                         Slider(value: $model.gestureCrossRatio, in: 0.15...1.0, step: 0.05)
@@ -636,7 +766,7 @@ struct AdvancedView: View {
                         )
                     )
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "启动后隐藏窗口", detail: "Mouser 仍会在菜单栏中运行") {
                     Toggle("启动后隐藏窗口", isOn: $model.startMinimized)
                 }
@@ -686,7 +816,7 @@ struct AdvancedView: View {
                     Toggle("记录调试事件", isOn: $model.debugMode)
                 }
                 if model.debugMode {
-                    Divider().padding(.leading, 16)
+                    MouserHairline()
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("事件日志")
@@ -707,7 +837,7 @@ struct AdvancedView: View {
                     }
                     .padding(16)
 
-                    Divider().padding(.leading, 16)
+                    MouserHairline()
                     SettingRow(title: "录制 HID++ 手势", detail: "记录按下、RawXY 位移和释放") {
                         Toggle(
                             "录制 HID++ 手势",
@@ -718,7 +848,7 @@ struct AdvancedView: View {
                         )
                     }
                     if model.gestureRecording || !model.gestureRecords.isEmpty {
-                        Divider().padding(.leading, 16)
+                        MouserHairline()
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 Text("手势记录")
@@ -761,14 +891,14 @@ struct AdvancedView: View {
                         }
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(
                     title: "自动检查更新",
                     detail: model.localizedRuntime(model.updateStatusText)
                 ) {
                     Toggle("自动检查更新", isOn: $model.automaticallyChecksForUpdates)
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "更新", detail: "更新源：Linmuge/Mouser") {
                     HStack {
                         Button("检查更新") {
@@ -789,7 +919,7 @@ struct AdvancedView: View {
                     }
                 }
                 if !model.updateInstallStatusText.isEmpty {
-                    Divider().padding(.leading, 16)
+                    MouserHairline()
                     SettingRow(
                         title: "安装状态",
                         detail: model.localizedRuntime(model.updateInstallStatusText)
@@ -800,7 +930,7 @@ struct AdvancedView: View {
                         }
                     }
                 }
-                Divider().padding(.leading, 16)
+                MouserHairline()
                 SettingRow(title: "诊断信息", detail: "不包含配置内容、账户或凭据") {
                     Button("导出…") {
                         model.exportDiagnostics()
@@ -867,14 +997,11 @@ private struct SettingsPage<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                PageHeader(title: title, subtitle: subtitle)
+            VStack(alignment: .leading, spacing: 18) {
                 content
-                    .mouserReveal(delay: 0.04)
             }
-            .padding(24)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

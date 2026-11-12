@@ -224,7 +224,7 @@ class BackendDeviceLayoutTests(unittest.TestCase):
 
         fetch_manifest.assert_called_once_with(
             "v3.7.0",
-            repo="TomBadash/Mouser",
+            repo="Linmuge/Mouser",
             highest_trusted_build=30699,
         )
         self.assertEqual(backend.updateInstallStatus, "manual_fallback")
@@ -400,17 +400,29 @@ class BackendDeviceLayoutTests(unittest.TestCase):
                 patch.dict("os.environ", {"MOUSER_ENABLE_UPDATE_INSTALL": "1"}),
                 patch("ui.backend.fetch_update_manifest_for_release", return_value=manifest),
                 patch("ui.backend.locate_runtime", return_value=runtime),
-                patch("ui.backend.prepare_downloaded_asset", return_value=archive),
+                patch(
+                    "ui.backend.prepare_downloaded_asset", return_value=archive
+                ) as prepare_asset,
                 patch("ui.backend.extract_validated_zip", return_value=staged) as extract_zip,
+                patch("ui.backend.verify_windows_authenticode") as verify_signature,
+                patch("ui.backend.verify_windows_content_catalog") as verify_catalog,
                 patch("ui.backend.os.getpid", return_value=1234),
             ):
                 backend._runPrepareLatestUpdate()
                 _ensure_qapp().processEvents()
 
             extract_zip.assert_called_once()
+            verify_signature.assert_called_once_with(staged.app_root / "Mouser.exe")
+            verify_catalog.assert_called_once_with(staged.app_root)
+            download_dir = prepare_asset.call_args.kwargs["download_dir"]
+            self.assertEqual(download_dir.parent.name, "v3.7.0")
+            self.assertRegex(download_dir.name, r"^[0-9a-f]{32}$")
             stage_arg = extract_zip.call_args.args[1]
             self.assertEqual(stage_arg.parent, install.resolve().parent)
-            self.assertEqual(stage_arg.name, ".Mouser.update-v3.7.0-1234")
+            self.assertRegex(
+                stage_arg.name,
+                r"^\.Mouser\.update-v3\.7\.0-1234-[0-9a-f]{32}$",
+            )
             self.assertEqual(backend.updateInstallStatus, "ready_to_install")
             self.assertTrue(backend.updateInstallCanInstall)
 
@@ -459,6 +471,48 @@ class BackendDeviceLayoutTests(unittest.TestCase):
 
         self.assertTrue(backend._update_cancel.is_set())
         self.assertEqual(backend.updateInstallStatus, "cancelled")
+
+    def test_cancelled_worker_blocks_retry_and_stale_generation_cannot_revive(self):
+        backend = self._make_backend()
+        backend._latest_update_version = "3.7.0"
+        workers = []
+
+        def make_thread(*, target, name, daemon):
+            worker = SimpleNamespace(target=target, start=lambda: None)
+            workers.append(worker)
+            return worker
+
+        with patch("ui.backend.threading.Thread", side_effect=make_thread):
+            backend.prepareLatestUpdate()
+            first_generation = backend._update_prepare_generation
+            first_token = backend._update_cancel
+            first_operation = backend._update_prepare_operation_id
+            backend.cancelUpdatePreparation()
+
+            backend.prepareLatestUpdate()
+            self.assertEqual(len(workers), 1)
+            self.assertTrue(first_token.is_set())
+            self.assertEqual(backend.updateInstallStatus, "cancelled")
+
+            backend._handleUpdateInstallState(
+                first_generation, "ready_to_install", "", True
+            )
+            self.assertEqual(backend.updateInstallStatus, "cancelled")
+            self.assertFalse(backend.updateInstallCanInstall)
+
+            backend._handleUpdatePreparationFinished(first_generation)
+            backend.prepareLatestUpdate()
+
+        self.assertEqual(len(workers), 2)
+        self.assertNotEqual(backend._update_cancel, first_token)
+        self.assertFalse(backend._update_cancel.is_set())
+        self.assertNotEqual(backend._update_prepare_operation_id, first_operation)
+
+        backend._handleUpdateInstallState(
+            first_generation, "ready_to_install", "", True
+        )
+        self.assertEqual(backend.updateInstallStatus, "checking")
+        self.assertFalse(backend.updateInstallCanInstall)
 
     def test_cancel_before_prepare_worker_runs_does_not_fetch_metadata(self):
         from core.update_installer import RuntimeLocation

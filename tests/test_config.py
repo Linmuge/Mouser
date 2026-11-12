@@ -2,6 +2,7 @@ import json
 import ntpath
 import os
 import plistlib
+import stat
 import tempfile
 import unittest
 from contextlib import contextmanager
@@ -24,6 +25,9 @@ def _platform_catalog(platform):
 
 
 class ConfigMigrationTests(unittest.TestCase):
+    def test_first_launch_defaults_to_a_visible_window(self):
+        self.assertFalse(config.DEFAULT_CONFIG["settings"]["start_minimized"])
+
     def test_migrate_v1_config_adds_profile_apps_and_gesture_defaults(self):
         legacy = {
             "version": 1,
@@ -196,6 +200,115 @@ class ConfigMigrationTests(unittest.TestCase):
         self.assertEqual(
             loaded["profiles"]["default"]["mappings"]["gesture_left"], "none"
         )
+
+    def test_load_config_backs_up_malformed_json_and_writes_defaults(self):
+        malformed = b'{"version": 9, broken'
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "config.json"
+            config_file.write_bytes(malformed)
+
+            with (
+                patch.object(config, "CONFIG_DIR", temp_dir),
+                patch.object(config, "CONFIG_FILE", str(config_file)),
+            ):
+                loaded = config.load_config()
+
+            backups = list(Path(temp_dir).glob("config.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), malformed)
+            self.assertEqual(stat.S_IMODE(backups[0].stat().st_mode), 0o600)
+            self.assertEqual(
+                json.loads(config_file.read_text(encoding="utf-8")),
+                config.DEFAULT_CONFIG,
+            )
+
+        self.assertEqual(loaded, config.DEFAULT_CONFIG)
+
+    def test_load_config_recovery_is_idempotent_across_repeated_loads(self):
+        malformed = b"{not-json"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "config.json"
+            config_file.write_bytes(malformed)
+
+            with (
+                patch.object(config, "CONFIG_DIR", temp_dir),
+                patch.object(config, "CONFIG_FILE", str(config_file)),
+            ):
+                first = config.load_config()
+                second = config.load_config()
+
+            backups = list(Path(temp_dir).glob("config.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), malformed)
+            self.assertEqual(first, config.DEFAULT_CONFIG)
+            self.assertEqual(second, config.DEFAULT_CONFIG)
+            self.assertEqual(
+                json.loads(config_file.read_text(encoding="utf-8")),
+                config.DEFAULT_CONFIG,
+            )
+
+    def test_load_config_writeback_failure_keeps_backup_and_corrupt_original(self):
+        malformed = b"{not-json"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "config.json"
+            config_file.write_bytes(malformed)
+
+            with (
+                patch.object(config, "CONFIG_DIR", temp_dir),
+                patch.object(config, "CONFIG_FILE", str(config_file)),
+                patch.object(
+                    config.os,
+                    "replace",
+                    side_effect=PermissionError("replace denied"),
+                ),
+                self.assertRaises(PermissionError),
+            ):
+                config.load_config()
+
+            backups = list(Path(temp_dir).glob("config.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), malformed)
+            self.assertEqual(config_file.read_bytes(), malformed)
+            self.assertEqual(list(Path(temp_dir).glob("*.tmp")), [])
+
+    def test_load_config_backup_failure_does_not_recover_or_overwrite_original(self):
+        malformed = b"{not-json"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "config.json"
+            config_file.write_bytes(malformed)
+
+            with (
+                patch.object(config, "CONFIG_DIR", temp_dir),
+                patch.object(config, "CONFIG_FILE", str(config_file)),
+                patch.object(
+                    config.tempfile,
+                    "mkstemp",
+                    side_effect=PermissionError("backup denied"),
+                ),
+                self.assertRaises(PermissionError),
+            ):
+                config.load_config()
+
+            self.assertEqual(config_file.read_bytes(), malformed)
+            self.assertEqual(
+                list(Path(temp_dir).glob("config.json.corrupt-*.bak")),
+                [],
+            )
+
+    def test_load_config_propagates_io_errors_instead_of_returning_defaults(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "config.json"
+            config_file.write_text("{}", encoding="utf-8")
+
+            with (
+                patch.object(config, "CONFIG_DIR", temp_dir),
+                patch.object(config, "CONFIG_FILE", str(config_file)),
+                patch("builtins.open", side_effect=PermissionError("read denied")),
+                self.assertRaises(PermissionError),
+            ):
+                config.load_config()
+
+            self.assertEqual(config_file.read_text(encoding="utf-8"), "{}")
 
     def test_migrate_renames_start_with_windows_to_start_at_login(self):
         legacy = {

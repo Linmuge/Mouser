@@ -75,16 +75,21 @@ extension LogitechDeviceDiscovering {
 }
 
 enum LogitechDeviceInventory {
-    static func preferredHIDPPInterface(
+    static func hidppInterfaces(
         from devices: [LogitechHIDDevice]
-    ) -> LogitechHIDDevice? {
+    ) -> [LogitechHIDDevice] {
         devices
             .filter(\.isHIDPPInterface)
             .sorted { lhs, rhs in
                 if lhs.isReceiver != rhs.isReceiver { return lhs.isReceiver }
                 return lhs.id < rhs.id
             }
-            .first
+    }
+
+    static func preferredHIDPPInterface(
+        from devices: [LogitechHIDDevice]
+    ) -> LogitechHIDDevice? {
+        hidppInterfaces(from: devices).first
     }
 }
 

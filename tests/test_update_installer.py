@@ -1,21 +1,26 @@
 from datetime import datetime, timedelta, timezone
 import errno
+import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 import unittest
 import zipfile
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core.update_installer import (
     APP_ID,
     ArchiveRequirements,
     DEFAULT_DOWNLOAD_TIMEOUT_SECONDS,
+    WINDOWS_CONTENT_CATALOG_NAME,
+    WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER,
     UpdateInstallError,
     WindowsUpdatePlan,
     apply_windows_update_from_state,
@@ -24,6 +29,7 @@ from core.update_installer import (
     download_to_file,
     extract_validated_zip,
     fetch_json,
+    fetch_update_manifest_for_release,
     launch_windows_update_helper,
     locate_runtime,
     manifest_name_for_version,
@@ -36,6 +42,8 @@ from core.update_installer import (
     sha256_file,
     stage_windows_update_helper,
     validate_zip_archive,
+    verify_windows_authenticode,
+    verify_windows_content_catalog,
     verify_file,
     verify_update_manifest,
     write_windows_update_plan,
@@ -55,18 +63,18 @@ def _payload(**updates):
         "tag": "v3.7.0",
         "build_number": 30700,
         "expires_at": expires.isoformat().replace("+00:00", "Z"),
-        "commit": "abc123",
-        "release_notes_url": "https://github.com/TomBadash/Mouser/releases/tag/v3.7.0",
+        "commit": "a" * 40,
+        "release_notes_url": "https://github.com/Linmuge/Mouser/releases/tag/v3.7.0",
         "assets": {
             "windows-x64": {
                 "name": "Mouser-Windows.zip",
-                "url": "https://github.com/TomBadash/Mouser/releases/download/v3.7.0/Mouser-Windows.zip",
+                "url": "https://github.com/Linmuge/Mouser/releases/download/v3.7.0/Mouser-Windows.zip",
                 "size": 123,
                 "sha256": "a" * 64,
             },
             "macos-arm64": {
                 "name": "Mouser-macOS.zip",
-                "url": "https://github.com/TomBadash/Mouser/releases/download/v3.7.0/Mouser-macOS.zip",
+                "url": "https://github.com/Linmuge/Mouser/releases/download/v3.7.0/Mouser-macOS.zip",
                 "size": 456,
                 "sha256": "b" * 64,
             },
@@ -140,9 +148,13 @@ class UpdateInstallerTests(unittest.TestCase):
         self.assertEqual(build_number_from_version("3.7.12"), 30712)
         with self.assertRaises(UpdateInstallError):
             build_number_from_version("3.7")
+        for ambiguous in ("1.100.0", "1.99.100"):
+            with self.subTest(version=ambiguous), self.assertRaises(UpdateInstallError):
+                build_number_from_version(ambiguous)
 
     def test_manifest_name_matches_release_url_contract(self):
         self.assertEqual(manifest_name_for_version("v3.7.0"), "mouser-v3.7.0-update.json")
+        self.assertIn("/Linmuge/Mouser/", manifest_url_for_release("v3.7.0"))
         self.assertTrue(
             manifest_url_for_release("v3.7.0").endswith(
                 "/v3.7.0/mouser-v3.7.0-update.json"
@@ -159,6 +171,10 @@ class UpdateInstallerTests(unittest.TestCase):
                 "http://127.0.0.1:8765/update.json",
             )
 
+        with self.assertRaises(UpdateInstallError) as ctx:
+            manifest_url_for_release("v3.7.0", repo="../Mouser")
+        self.assertEqual(ctx.exception.code, "invalid_repo")
+
     def test_fetch_json_accepts_utf8_bom_response(self):
         payload = b'\xef\xbb\xbf{"schema": 1, "app_id": "io.github.tombadash.mouser"}'
 
@@ -167,6 +183,35 @@ class UpdateInstallerTests(unittest.TestCase):
 
         self.assertEqual(parsed["schema"], 1)
         self.assertEqual(parsed["app_id"], APP_ID)
+
+    def test_fetch_manifest_keeps_transport_injectable_and_binds_request_tag(self):
+        with patch(
+            "core.update_installer.fetch_json", return_value=_payload()
+        ) as fetch:
+            manifest = fetch_update_manifest_for_release(
+                "3.7.0",
+                target_platform="windows-x64",
+                timeout=2.5,
+            )
+
+        self.assertEqual(manifest.tag, "v3.7.0")
+        fetch.assert_called_once_with(
+            "https://github.com/Linmuge/Mouser/releases/download/"
+            "v3.7.0/mouser-v3.7.0-update.json",
+            timeout=2.5,
+        )
+
+        with (
+            patch(
+                "core.update_installer.fetch_json",
+                return_value=_payload(tag="v3.7.1"),
+            ),
+            self.assertRaises(UpdateInstallError) as ctx,
+        ):
+            fetch_update_manifest_for_release(
+                "v3.7.0", target_platform="windows-x64"
+            )
+        self.assertEqual(ctx.exception.code, "tag_mismatch")
 
     def test_update_manifest_verifies_selected_platform(self):
         manifest = verify_update_manifest(_payload(), platform_key="windows-x64")
@@ -188,6 +233,25 @@ class UpdateInstallerTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, "wrong_app")
 
+    def test_update_manifest_rejects_coerced_numeric_fields(self):
+        cases = (
+            ({"schema": "1"}, "unsupported_schema"),
+            ({"build_number": "30700"}, "missing_build_number"),
+        )
+        for updates, expected_code in cases:
+            with self.subTest(expected_code=expected_code):
+                with self.assertRaises(UpdateInstallError) as ctx:
+                    verify_update_manifest(
+                        _payload(**updates), platform_key="windows-x64"
+                    )
+                self.assertEqual(ctx.exception.code, expected_code)
+
+        payload = _payload()
+        payload["assets"]["windows-x64"]["size"] = "123"
+        with self.assertRaises(UpdateInstallError) as ctx:
+            verify_update_manifest(payload, platform_key="windows-x64")
+        self.assertEqual(ctx.exception.code, "missing_asset_size")
+
     def test_update_manifest_rejects_missing_selected_asset(self):
         with self.assertRaises(UpdateInstallError) as ctx:
             verify_update_manifest(_payload(), platform_key="linux-x64")
@@ -204,11 +268,307 @@ class UpdateInstallerTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, "older_build")
 
+    def test_update_manifest_binds_version_tag_build_commit_and_release_url(self):
+        cases = (
+            ({"tag": "v3.7.1"}, "tag_mismatch"),
+            ({"build_number": 999999}, "invalid_build_number"),
+            ({"commit": "abc123"}, "invalid_commit"),
+            (
+                {
+                    "release_notes_url": (
+                        "https://github.com/other/Mouser/releases/tag/v3.7.0"
+                    )
+                },
+                "release_url_mismatch",
+            ),
+        )
+        for updates, expected_code in cases:
+            with self.subTest(expected_code=expected_code):
+                with self.assertRaises(UpdateInstallError) as ctx:
+                    verify_update_manifest(
+                        _payload(**updates), platform_key="windows-x64"
+                    )
+                self.assertEqual(ctx.exception.code, expected_code)
+
+    def test_update_manifest_binds_requested_tag_and_asset_release_url(self):
+        with self.assertRaises(UpdateInstallError) as ctx:
+            verify_update_manifest(
+                _payload(),
+                platform_key="windows-x64",
+                expected_tag="v3.8.0",
+            )
+        self.assertEqual(ctx.exception.code, "tag_mismatch")
+
+        payload = _payload()
+        payload["assets"]["windows-x64"]["url"] = (
+            "https://github.com/Linmuge/Mouser/releases/download/"
+            "v3.8.0/Mouser-Windows.zip"
+        )
+        with self.assertRaises(UpdateInstallError) as ctx:
+            verify_update_manifest(payload, platform_key="windows-x64")
+        self.assertEqual(ctx.exception.code, "asset_url_mismatch")
+
+    def test_update_manifest_rejects_unexpected_or_unsafe_asset_names(self):
+        for name, expected_code in (
+            ("../Mouser-Windows.zip", "unsafe_asset_name"),
+            ("subdir/Mouser-Windows.zip", "unsafe_asset_name"),
+            (r"subdir\Mouser-Windows.zip", "unsafe_asset_name"),
+            ("/tmp/Mouser-Windows.zip", "unsafe_asset_name"),
+            ("Mouser-Linux.zip", "unexpected_asset_name"),
+        ):
+            with self.subTest(name=name):
+                payload = _payload()
+                payload["assets"]["windows-x64"]["name"] = name
+                payload["assets"]["windows-x64"]["url"] = (
+                    "https://github.com/Linmuge/Mouser/releases/download/"
+                    f"v3.7.0/{name}"
+                )
+                with self.assertRaises(UpdateInstallError) as ctx:
+                    verify_update_manifest(payload, platform_key="windows-x64")
+                self.assertEqual(ctx.exception.code, expected_code)
+
+    def test_legacy_expiry_is_advisory_for_immutable_unsigned_manifest(self):
+        payload = _payload(expires_at="2020-01-01T00:00:00Z")
+
+        manifest = verify_update_manifest(
+            payload,
+            platform_key="windows-x64",
+            now=datetime.now(timezone.utc).timestamp(),
+        )
+
+        self.assertEqual(manifest.expires_at, "2020-01-01T00:00:00Z")
+
+    def test_update_manifest_rejects_invalid_legacy_expiry(self):
+        with self.assertRaises(UpdateInstallError) as ctx:
+            verify_update_manifest(
+                _payload(expires_at="not-a-date"), platform_key="windows-x64"
+            )
+        self.assertEqual(ctx.exception.code, "invalid_expiry")
+
     def test_platform_key_detects_common_architectures(self):
         self.assertEqual(platform_key("win32", "AMD64"), "windows-x64")
         self.assertEqual(platform_key("win32", "ARM64"), "windows-arm64")
         self.assertEqual(platform_key("darwin", "arm64"), "macos-arm64")
         self.assertEqual(platform_key("linux", "x86_64"), "linux-x64")
+        self.assertEqual(platform_key("win32", "riscv64"), "windows-riscv64")
+        self.assertEqual(platform_key("darwin", "mystery"), "macos-mystery")
+        self.assertEqual(platform_key("linux", "i686"), "linux-i686")
+
+    def test_verify_windows_authenticode_accepts_expected_publisher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Mouser.exe"
+            executable.write_bytes(b"signed")
+            calls = []
+
+            def runner(argv, **kwargs):
+                calls.append((argv, kwargs))
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "Valid",
+                            "publisher": WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER,
+                            "thumbprint": "ab" * 20,
+                        }
+                    ),
+                    stderr="",
+                )
+
+            thumbprint = verify_windows_authenticode(
+                executable,
+                sys_platform="win32",
+                runner=runner,
+            )
+
+        self.assertEqual(thumbprint, "AB" * 20)
+        self.assertEqual(len(calls), 1)
+        argv, kwargs = calls[0]
+        self.assertEqual(argv[0], "powershell.exe")
+        self.assertIn("$null -eq $signature", argv[-1])
+        self.assertEqual(
+            kwargs["env"]["MOUSER_AUTHENTICODE_TARGET"],
+            str(executable.resolve()),
+        )
+
+    def test_verify_windows_authenticode_rejects_wrong_publisher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Mouser.exe"
+            executable.write_bytes(b"signed")
+
+            def runner(_argv, **_kwargs):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "Valid",
+                            "publisher": "Unexpected Publisher",
+                            "thumbprint": "ab" * 20,
+                        }
+                    ),
+                    stderr="",
+                )
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                verify_windows_authenticode(
+                    executable,
+                    sys_platform="win32",
+                    runner=runner,
+                )
+
+        self.assertEqual(ctx.exception.code, "invalid_signature")
+
+    def test_verify_windows_authenticode_rejects_invalid_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Mouser.exe"
+            executable.write_bytes(b"signed")
+
+            def runner(_argv, **_kwargs):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "status": "HashMismatch",
+                            "publisher": WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER,
+                            "thumbprint": "ab" * 20,
+                        }
+                    ),
+                    stderr="",
+                )
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                verify_windows_authenticode(
+                    executable,
+                    sys_platform="win32",
+                    runner=runner,
+                )
+
+        self.assertEqual(ctx.exception.code, "invalid_signature")
+
+    def test_verify_windows_authenticode_rejects_malformed_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executable = Path(tmp) / "Mouser.exe"
+            executable.write_bytes(b"signed")
+
+            def runner(_argv, **_kwargs):
+                return SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                verify_windows_authenticode(
+                    executable,
+                    sys_platform="win32",
+                    runner=runner,
+                )
+
+        self.assertEqual(ctx.exception.code, "invalid_signature")
+
+    def test_verify_windows_content_catalog_accepts_valid_signed_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Mouser"
+            root.mkdir()
+            (root / WINDOWS_CONTENT_CATALOG_NAME).write_bytes(b"signed catalog")
+            calls = []
+
+            def runner(argv, **kwargs):
+                calls.append((argv, kwargs))
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        {
+                            "catalog_status": "Valid",
+                            "hash_algorithm": "SHA256",
+                            "signature_status": "Valid",
+                            "publisher": WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER,
+                            "thumbprint": "cd" * 20,
+                        }
+                    ),
+                    stderr="",
+                )
+
+            thumbprint = verify_windows_content_catalog(
+                root,
+                sys_platform="win32",
+                runner=runner,
+            )
+
+        self.assertEqual(thumbprint, "CD" * 20)
+        self.assertEqual(len(calls), 1)
+        argv, kwargs = calls[0]
+        self.assertIn("Test-FileCatalog", argv[-1])
+        self.assertIn("-FilesToSkip $catalogName", argv[-1])
+        self.assertEqual(kwargs["env"]["MOUSER_CATALOG_ROOT"], str(root.resolve()))
+
+    def test_verify_windows_content_catalog_rejects_invalid_results(self):
+        valid = {
+            "catalog_status": "Valid",
+            "hash_algorithm": "SHA256",
+            "signature_status": "Valid",
+            "publisher": WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER,
+            "thumbprint": "cd" * 20,
+        }
+        cases = (
+            ({"catalog_status": "ValidationFailed"}, "catalog status"),
+            ({"hash_algorithm": "SHA1"}, "hash algorithm"),
+            ({"signature_status": "NotSigned"}, "signature status"),
+            ({"publisher": "Unexpected Publisher"}, "publisher"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Mouser"
+            root.mkdir()
+            (root / WINDOWS_CONTENT_CATALOG_NAME).write_bytes(b"catalog")
+            for updates, label in cases:
+                payload = dict(valid)
+                payload.update(updates)
+
+                def runner(_argv, **_kwargs):
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(payload),
+                        stderr="",
+                    )
+
+                with self.subTest(label=label), self.assertRaises(
+                    UpdateInstallError
+                ) as ctx:
+                    verify_windows_content_catalog(
+                        root,
+                        sys_platform="win32",
+                        runner=runner,
+                    )
+                self.assertEqual(ctx.exception.code, "invalid_content_catalog")
+
+    def test_verify_windows_content_catalog_rejects_malformed_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Mouser"
+            root.mkdir()
+            (root / WINDOWS_CONTENT_CATALOG_NAME).write_bytes(b"catalog")
+
+            def runner(_argv, **_kwargs):
+                return SimpleNamespace(returncode=0, stdout="not-json", stderr="")
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                verify_windows_content_catalog(
+                    root,
+                    sys_platform="win32",
+                    runner=runner,
+                )
+
+        self.assertEqual(ctx.exception.code, "invalid_content_catalog")
+
+    def test_verify_windows_content_catalog_requires_catalog_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "Mouser"
+            root.mkdir()
+            runner = Mock()
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                verify_windows_content_catalog(
+                    root,
+                    sys_platform="win32",
+                    runner=runner,
+                )
+
+        self.assertEqual(ctx.exception.code, "invalid_content_catalog")
+        runner.assert_not_called()
 
     def test_verify_file_checks_size_and_sha256(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -577,31 +937,133 @@ class UpdateInstallerTests(unittest.TestCase):
             )
             progress = []
 
-            path = prepare_downloaded_asset(
-                asset,
-                download_dir=root / "downloads",
-                progress_callback=progress.append,
-            )
+            with patch(
+                "core.update_installer.os.replace", wraps=os.replace
+            ) as replace:
+                path = prepare_downloaded_asset(
+                    asset,
+                    download_dir=root / "downloads",
+                    progress_callback=progress.append,
+                )
 
             self.assertEqual(path.read_bytes(), b"verified")
             self.assertEqual(progress[-1], source.stat().st_size)
+            replace.assert_called_once()
+            temporary, final = map(Path, replace.call_args.args)
+            self.assertEqual(temporary.parent, final.parent)
+            self.assertEqual(final, path)
+            self.assertRegex(
+                temporary.name,
+                r"^\.Mouser-Windows\.zip\.[0-9a-f]{32}\.part$",
+            )
+            self.assertFalse(temporary.exists())
+
+    def test_download_to_file_uses_exclusive_create_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "asset.zip"
+            source.write_bytes(b"new")
+            target = root / "target.zip"
+            target.write_bytes(b"existing")
+
+            with self.assertRaises(FileExistsError):
+                download_to_file(source.as_uri(), target)
+
+            self.assertEqual(target.read_bytes(), b"existing")
+
+    def test_prepare_downloaded_asset_removes_partial_temp_on_cancel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "asset.zip"
+            source.write_bytes(b"x" * (2 * 1024 * 1024))
+            downloads = root / "downloads"
+            cancel_event = _CancelEvent(False)
+            asset = UpdateAsset(
+                "windows-x64",
+                "Mouser-Windows.zip",
+                source.as_uri(),
+                source.stat().st_size,
+                sha256_file(source),
+            )
+
+            def cancel_after_progress(_written):
+                cancel_event.value = True
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                prepare_downloaded_asset(
+                    asset,
+                    download_dir=downloads,
+                    cancel_event=cancel_event,
+                    progress_callback=cancel_after_progress,
+                )
+
+            self.assertEqual(ctx.exception.code, "cancelled")
+            self.assertEqual(list(downloads.iterdir()), [])
+
+    def test_prepare_downloaded_asset_rejects_name_escape_before_download(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in (
+                "../Mouser-Windows.zip",
+                "/tmp/Mouser-Windows.zip",
+                "nested/Mouser-Windows.zip",
+                r"nested\Mouser-Windows.zip",
+            ):
+                with self.subTest(name=name):
+                    asset = UpdateAsset(
+                        "windows-x64",
+                        name,
+                        "https://example.invalid/asset",
+                        1,
+                        "a" * 64,
+                    )
+                    with self.assertRaises(UpdateInstallError) as ctx:
+                        prepare_downloaded_asset(asset, download_dir=root / "downloads")
+                    self.assertEqual(ctx.exception.code, "unsafe_asset_name")
+
+    def test_prepare_downloaded_asset_rejects_existing_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            outside = root / "outside.zip"
+            outside.write_bytes(b"outside")
+            (downloads / "Mouser-Windows.zip").symlink_to(outside)
+            asset = UpdateAsset(
+                "windows-x64",
+                "Mouser-Windows.zip",
+                "https://example.invalid/Mouser-Windows.zip",
+                outside.stat().st_size,
+                sha256_file(outside),
+            )
+
+            with self.assertRaises(UpdateInstallError) as ctx:
+                prepare_downloaded_asset(asset, download_dir=downloads)
+
+            self.assertEqual(ctx.exception.code, "unsafe_asset_path")
 
     def test_prepare_downloaded_asset_uses_default_download_timeout(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target_path = root / "downloads" / "Mouser-Windows.zip"
-            target_path.parent.mkdir()
-            target_path.write_bytes(b"verified")
+            payload = b"verified"
             asset = UpdateAsset(
                 "windows-x64",
                 "Mouser-Windows.zip",
                 "https://example.invalid/Mouser-Windows.zip",
-                target_path.stat().st_size,
-                sha256_file(target_path),
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
             )
 
-            with patch("core.update_installer.download_to_file") as download:
-                download.return_value = target_path
+            def fake_download(_url, path, **_kwargs):
+                path = Path(path)
+                path.write_bytes(payload)
+                return path
+
+            with patch(
+                "core.update_installer.download_to_file",
+                side_effect=fake_download,
+            ) as download:
 
                 prepare_downloaded_asset(asset, download_dir=target_path.parent)
 
@@ -614,18 +1076,24 @@ class UpdateInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target_path = root / "downloads" / "Mouser-Windows.zip"
-            target_path.parent.mkdir()
-            target_path.write_bytes(b"verified")
+            payload = b"verified"
             asset = UpdateAsset(
                 "windows-x64",
                 "Mouser-Windows.zip",
                 "https://example.invalid/Mouser-Windows.zip",
-                target_path.stat().st_size,
-                sha256_file(target_path),
+                len(payload),
+                hashlib.sha256(payload).hexdigest(),
             )
 
-            with patch("core.update_installer.download_to_file") as download:
-                download.return_value = target_path
+            def fake_download(_url, path, **_kwargs):
+                path = Path(path)
+                path.write_bytes(payload)
+                return path
+
+            with patch(
+                "core.update_installer.download_to_file",
+                side_effect=fake_download,
+            ) as download:
 
                 prepare_downloaded_asset(
                     asset,
@@ -814,9 +1282,17 @@ class UpdateInstallerTests(unittest.TestCase):
             runner = _FakeRunner()
 
             with patch("core.update_installer._pid_exists", return_value=False):
-                result = apply_windows_update_from_state(state, runner=runner)
+                with patch(
+                    "core.update_installer.verify_windows_authenticode"
+                ) as verify_signature:
+                    with patch(
+                        "core.update_installer.verify_windows_content_catalog"
+                    ) as verify_catalog:
+                        result = apply_windows_update_from_state(state, runner=runner)
 
             self.assertEqual(result, 0)
+            verify_signature.assert_called_once_with(staged / "Mouser.exe")
+            verify_catalog.assert_called_once_with(staged)
             self.assertEqual((install / "Mouser.exe").read_text(encoding="utf-8"), "new")
             self.assertEqual((backup / "Mouser.exe").read_text(encoding="utf-8"), "old")
             self.assertEqual(read_update_result(marker)["status"], "installed")
@@ -861,12 +1337,20 @@ class UpdateInstallerTests(unittest.TestCase):
 
             with (
                 patch("core.update_installer._pid_exists", return_value=False),
+                patch(
+                    "core.update_installer.verify_windows_authenticode"
+                ) as verify_signature,
+                patch(
+                    "core.update_installer.verify_windows_content_catalog"
+                ) as verify_catalog,
                 patch("core.update_installer.Path.rename", autospec=True, side_effect=rename_side_effect),
                 patch("core.update_installer.time.sleep"),
             ):
                 result = apply_windows_update_from_state(state)
 
             self.assertEqual(result, 1)
+            verify_signature.assert_called_once_with(staged / "Mouser.exe")
+            verify_catalog.assert_called_once_with(staged)
             self.assertEqual(rollback_attempts["count"], 2)
             self.assertEqual((install / "Mouser.exe").read_text(encoding="utf-8"), "old")
             update_result = read_update_result(marker)
@@ -909,12 +1393,20 @@ class UpdateInstallerTests(unittest.TestCase):
 
             with (
                 patch("core.update_installer._pid_exists", return_value=False),
+                patch(
+                    "core.update_installer.verify_windows_authenticode"
+                ) as verify_signature,
+                patch(
+                    "core.update_installer.verify_windows_content_catalog"
+                ) as verify_catalog,
                 patch("core.update_installer.Path.rename", autospec=True, side_effect=rename_side_effect),
                 patch("core.update_installer.time.sleep"),
             ):
                 result = apply_windows_update_from_state(state)
 
             self.assertEqual(result, 1)
+            verify_signature.assert_called_once_with(staged / "Mouser.exe")
+            verify_catalog.assert_called_once_with(staged)
             self.assertFalse(install.exists())
             self.assertTrue(backup.exists())
             update_result = read_update_result(marker)
@@ -948,10 +1440,20 @@ class UpdateInstallerTests(unittest.TestCase):
             state.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
             runner = _FakeRunner()
 
-            with patch("core.update_installer._pid_exists", return_value=False):
+            with (
+                patch("core.update_installer._pid_exists", return_value=False),
+                patch(
+                    "core.update_installer.verify_windows_authenticode"
+                ) as verify_signature,
+                patch(
+                    "core.update_installer.verify_windows_content_catalog"
+                ) as verify_catalog,
+            ):
                 result = apply_windows_update_from_state(state, runner=runner)
 
             self.assertEqual(result, 0)
+            verify_signature.assert_called_once_with(staged / "Mouser.exe")
+            verify_catalog.assert_called_once_with(staged)
             self.assertEqual((install / "Mouser.exe").read_text(encoding="utf-8"), "new")
             self.assertEqual(len(runner.popen_calls), 1)
 

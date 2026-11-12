@@ -1,28 +1,43 @@
 import AppKit
 import SwiftUI
 
+/// Mouser 视觉体系 —— macOS 27 Liquid Glass 原生实现：
+/// 动态环境光画布 + `glassEffect` 玻璃卡片 + 系统玻璃控件，界面随状态呼吸。
 enum MouserStyle {
+    /// 唯一强调色：Apple 蓝。仅用于交互元素与选中态。
     static let accent = adaptive(
+        light: RGB(red: 0, green: 113, blue: 227),
+        dark: RGB(red: 10, green: 132, blue: 255)
+    )
+    /// 环境光副色：Mouser 品牌青，只作背景光晕，不进入控件。
+    static let ambientTeal = adaptive(
         light: RGB(red: 10, green: 159, blue: 146),
         dark: RGB(red: 50, green: 214, blue: 194)
     )
-    static let accentBlue = Color(red: 0.20, green: 0.46, blue: 0.96)
-    static let accentMint = Color(red: 0.30, green: 0.82, blue: 0.68)
     static let connected = adaptive(
-        light: RGB(red: 49, green: 184, blue: 117),
-        dark: RGB(red: 72, green: 217, blue: 144)
+        light: RGB(red: 43, green: 159, blue: 94),
+        dark: RGB(red: 52, green: 199, blue: 89)
     )
-    static let ink = adaptive(
-        light: RGB(red: 21, green: 26, blue: 28),
-        dark: RGB(red: 241, green: 245, blue: 244)
+    static let warning = adaptive(
+        light: RGB(red: 224, green: 98, blue: 13),
+        dark: RGB(red: 255, green: 159, blue: 10)
     )
-    static let muted = adaptive(
-        light: RGB(red: 112, green: 121, blue: 124),
-        dark: RGB(red: 155, green: 166, blue: 164)
+
+    /// 画布底色：玻璃之下需要有内容才能折射，环境光球负责层次。
+    static let canvasBackground = adaptive(
+        light: RGB(red: 233, green: 234, blue: 238),
+        dark: RGB(red: 22, green: 23, blue: 27)
     )
-    static let warning = Color(red: 0.96, green: 0.58, blue: 0.13)
-    static let panelRadius: CGFloat = 24
-    static let compactRadius: CGFloat = 14
+    static let cardBackground = adaptive(
+        light: RGB(red: 255, green: 255, blue: 255),
+        dark: RGB(red:41, green: 43, blue: 49)
+    )
+
+    static let radiusPanel: CGFloat = 20
+    static let radiusCard: CGFloat = 18
+    static let radiusInner: CGFloat = 12
+    static let radiusControl: CGFloat = 10
+    static let radiusRow: CGFloat = 8
 
     private struct RGB {
         let red: Int
@@ -49,9 +64,11 @@ enum MouserStyle {
 }
 
 enum MouserMotion {
-    static let hover = Animation.smooth(duration: 0.16)
-    static let selection = Animation.spring(duration: 0.34, bounce: 0.18)
-    static let reveal = Animation.smooth(duration: 0.36)
+    static let hover = Animation.easeOut(duration: 0.14)
+    static let selection = Animation.spring(duration: 0.35, bounce: 0.12)
+    static let reveal = Animation.smooth(duration: 0.3)
+    static let numeric = Animation.spring(duration: 0.45, bounce: 0.2)
+    static let orbDrift = Animation.linear(duration: 14).repeatForever(autoreverses: true)
 }
 
 struct WindowAppearanceBridge: NSViewRepresentable {
@@ -109,46 +126,137 @@ final class WindowAppearanceView: NSView {
     }
 }
 
-extension View {
-    func mouserGlass(cornerRadius: CGFloat = MouserStyle.panelRadius) -> some View {
-        glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-    }
+// MARK: - 动态环境光画布
 
-    func mouserInteractiveGlass(
-        cornerRadius: CGFloat = MouserStyle.compactRadius,
+/// 液态玻璃需要背后有色彩才会折射；两团缓慢漂移的环境光让界面「呼吸」。
+struct MouserBackground: View {
+    var glow: Color = MouserStyle.ambientTeal
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var drifting = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                MouserStyle.canvasBackground
+
+                AmbientOrb(
+                    color: glow,
+                    size: max(proxy.size.width * 0.5, 380),
+                    drift: drifting
+                )
+                .offset(
+                    x: proxy.size.width * 0.66,
+                    y: -proxy.size.height * 0.30
+                )
+
+                AmbientOrb(
+                    color: MouserStyle.accent,
+                    size: max(proxy.size.width * 0.38, 300),
+                    drift: drifting
+                )
+                .offset(
+                    x: -proxy.size.width * 0.42,
+                    y: proxy.size.height * 0.44
+                )
+                .opacity(0.8)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            guard !reduceMotion, !drifting else { return }
+            withAnimation(MouserMotion.orbDrift) { drifting = true }
+        }
+    }
+}
+
+struct AmbientOrb: View {
+    let color: Color
+    let size: CGFloat
+    var drift: Bool = false
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [color.opacity(0.22), color.opacity(0.02)],
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: size * 0.5
+                )
+            )
+            .frame(width: size, height: size)
+            .blur(radius: size * 0.18)
+            .offset(
+                x: drift ? size * 0.06 : -size * 0.04,
+                y: drift ? size * 0.05 : -size * 0.05
+            )
+            .allowsHitTesting(false)
+    }
+}
+
+// MARK: - 玻璃表面
+
+/// macOS 27 系统液态玻璃卡片；玻璃自带折射与高光边，不再叠实色底。
+private struct MouserGlassCard: ViewModifier {
+    let cornerRadius: CGFloat
+    let tint: Color?
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .glassEffect(
+                tint.map { .regular.tint($0.opacity(0.16)) } ?? .regular,
+                in: shape
+            )
+            .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
+    }
+}
+
+extension View {
+    func mouserCard(
+        cornerRadius: CGFloat = MouserStyle.radiusCard,
         tint: Color? = nil
     ) -> some View {
-        glassEffect(
-            .regular.tint(tint).interactive(),
-            in: .rect(cornerRadius: cornerRadius)
-        )
+        modifier(MouserGlassCard(cornerRadius: cornerRadius, tint: tint))
     }
 
-    func settingsPanel() -> some View {
-        let shape = RoundedRectangle(
-            cornerRadius: MouserStyle.panelRadius,
-            style: .continuous
-        )
-        return self
-            .background(.ultraThinMaterial, in: shape)
-            .overlay {
-                shape.stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.42),
-                            Color.primary.opacity(0.08),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.75
-                )
-            }
-            .shadow(color: .black.opacity(0.055), radius: 24, y: 12)
+    /// 悬停时轻微浮起，用于可点卡片，赋予玻璃生命感。
+    func mouserHoverLift() -> some View {
+        modifier(MouserHoverLiftModifier())
     }
 
     func mouserReveal(delay: Double = 0) -> some View {
         modifier(MouserRevealModifier(delay: delay))
+    }
+}
+
+private struct MouserHoverLiftModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(isHovered && !reduceMotion ? 1.008 : 1)
+            .shadow(
+                color: .black.opacity(isHovered ? 0.16 : 0.10),
+                radius: isHovered ? 18 : 14,
+                y: isHovered ? 9 : 6
+            )
+            .onHover { isHovered = $0 }
+            .animation(reduceMotion ? nil : MouserMotion.hover, value: isHovered)
+    }
+}
+
+/// 卡片内嵌列表的分隔发丝线；与 SettingRow 的左内边距对齐。
+struct MouserHairline: View {
+    var leadingInset: CGFloat = 16
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(height: 0.5)
+            .padding(.leading, leadingInset)
     }
 }
 
@@ -163,8 +271,7 @@ struct MouserRevealModifier: ViewModifier {
 
         content
             .opacity(revealed ? 1 : 0)
-            .offset(y: revealed ? 0 : 9)
-            .scaleEffect(revealed ? 1 : 0.992, anchor: .top)
+            .offset(y: revealed ? 0 : 8)
             .onAppear {
                 guard !isVisible else { return }
                 if reduceMotion {
@@ -178,106 +285,45 @@ struct MouserRevealModifier: ViewModifier {
     }
 }
 
-struct MouserGlassCluster<Content: View>: View {
-    let spacing: CGFloat
-    @ViewBuilder let content: Content
+// MARK: - 通用小组件
 
-    init(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) {
-        self.spacing = spacing
-        self.content = content()
-    }
+/// 品牌徽章：蓝色渐变 + 顶部高光 + 蓝色投影。
+struct MouserIconBadge: View {
+    let systemImage: String
+    var size: CGFloat = 34
 
     var body: some View {
-        GlassEffectContainer(spacing: spacing) {
-            content
-        }
-    }
-}
-
-struct MouserBackground: View {
-    let section: WorkspaceSection
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                Color(nsColor: .windowBackgroundColor)
-
-                LinearGradient(
-                    colors: [
-                        MouserStyle.accent.opacity(0.07),
-                        Color.clear,
-                        MouserStyle.accentBlue.opacity(0.035),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
+        ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: size * 0.29, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.10, green: 0.48, blue: 0.95),
+                            Color(red: 0.04, green: 0.35, blue: 0.78),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
                 )
-
-                AmbientOrb(
-                    color: MouserStyle.accent,
-                    size: max(proxy.size.width * 0.44, 320)
-                )
-                .offset(
-                    x: proxy.size.width * 0.34,
-                    y: -proxy.size.height * 0.34
-                )
-
-                AmbientOrb(
-                    color: MouserStyle.accentBlue,
-                    size: max(proxy.size.width * 0.30, 240)
-                )
-                .opacity(0.55)
-                .offset(
-                    x: -proxy.size.width * 0.40,
-                    y: proxy.size.height * 0.38
-                )
-            }
-        }
-        .ignoresSafeArea()
-    }
-}
-
-struct AmbientOrb: View {
-    let color: Color
-    let size: CGFloat
-
-    var body: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [color.opacity(0.24), color.opacity(0.02)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+            LinearGradient(
+                colors: [Color.white.opacity(0.5), Color.white.opacity(0)],
+                startPoint: .top,
+                endPoint: .center
             )
-            .frame(width: size, height: size)
-            .blur(radius: size * 0.24)
-            .blendMode(.plusLighter)
-            .allowsHitTesting(false)
-    }
-}
-
-struct PageHeader: View {
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Capsule()
-                .fill(MouserStyle.accent.gradient)
-                .frame(width: 5, height: 46)
-                .shadow(color: MouserStyle.accent.opacity(0.35), radius: 8)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(LocalizedStringKey(title))
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .tracking(-0.45)
-                Text(LocalizedStringKey(subtitle))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.29, style: .continuous))
+            Image(systemName: systemImage)
+                .font(.system(size: size * 0.47, weight: .medium))
+                .foregroundStyle(.white)
+                .symbolRenderingMode(.hierarchical)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .mouserReveal()
+        .frame(width: size, height: size)
+        .shadow(
+            color: Color(red: 18.0 / 255, green: 92.0 / 255, blue: 205.0 / 255).opacity(0.35),
+            radius: 2.5,
+            y: 2
+        )
+        .accessibilityHidden(true)
     }
 }
 
@@ -286,20 +332,66 @@ struct StatusDot: View {
 
     var body: some View {
         Circle()
-            .fill(active ? MouserStyle.connected : .secondary)
-            .frame(width: 8, height: 8)
-            .shadow(color: active ? MouserStyle.connected.opacity(0.45) : .clear, radius: 4)
+            .fill(active ? MouserStyle.connected : Color.secondary)
+            .frame(width: 7, height: 7)
+            .shadow(
+                color: active ? MouserStyle.connected.opacity(0.55) : .clear,
+                radius: 3.5
+            )
             .accessibilityHidden(true)
     }
 }
+
+/// 状态胶囊：圆点 + 文字，语义色 12% 淡染底。
+struct StatusPill: View {
+    let title: String
+    let tint: Color
+    var active: Bool = true
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(active ? tint : Color.secondary)
+                .frame(width: 6, height: 6)
+            Text(LocalizedStringKey(title))
+                .lineLimit(1)
+        }
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(active ? tint : .secondary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            (active ? tint : Color.secondary).opacity(0.12),
+            in: Capsule()
+        )
+    }
+}
+
+/// 页面标题。
+struct PageHeader: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(LocalizedStringKey(title))
+                .font(.system(size: 24, weight: .semibold))
+                .tracking(-0.4)
+            Text(LocalizedStringKey(subtitle))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .mouserReveal()
+    }
+}
+
+// MARK: - 设置行与分组
 
 struct SettingRow<Control: View>: View {
     let title: String
     let detail: String?
     @ViewBuilder let control: Control
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovered = false
 
     init(title: String, detail: String? = nil, @ViewBuilder control: () -> Control) {
         self.title = title
@@ -308,31 +400,23 @@ struct SettingRow<Control: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 20) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(title))
+                    .font(.system(size: 13, weight: .semibold))
                 if let detail {
                     Text(LocalizedStringKey(detail))
-                        .font(.caption)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 18)
+            Spacer(minLength: 14)
             control
                 .labelsHidden()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, detail == nil ? 12 : 10)
-        .background {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(isHovered ? Color.primary.opacity(0.035) : .clear)
-                .padding(.horizontal, 5)
-        }
-        .offset(y: isHovered && !reduceMotion ? -1 : 0)
-        .scaleEffect(isHovered && !reduceMotion ? 1.002 : 1)
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        .animation(reduceMotion ? nil : MouserMotion.hover, value: isHovered)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
     }
 }
 
@@ -349,21 +433,22 @@ struct SettingsGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(title))
-                    .font(.headline)
+                    .font(.system(size: 12.5, weight: .semibold))
                 if let caption {
                     Text(LocalizedStringKey(caption))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
 
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 content
             }
-            .settingsPanel()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .mouserCard(cornerRadius: MouserStyle.radiusInner + 2)
         }
     }
 }

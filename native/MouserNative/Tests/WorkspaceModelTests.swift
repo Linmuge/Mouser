@@ -271,6 +271,89 @@ private actor WorkspaceHIDDiscovery: LogitechDeviceDiscovering {
     }
 }
 
+private actor CandidateWorkspaceHIDDiscovery: LogitechDeviceDiscovering {
+    let identitiesByDeviceID: [UInt64: HIDPPDeviceIdentity]
+    private(set) var identifiedDeviceIDs: [UInt64] = []
+
+    init(identitiesByDeviceID: [UInt64: HIDPPDeviceIdentity]) {
+        self.identitiesByDeviceID = identitiesByDeviceID
+    }
+
+    nonisolated func updates() -> AsyncStream<[LogitechHIDDevice]> {
+        AsyncStream { $0.finish() }
+    }
+
+    func identify(_ device: LogitechHIDDevice) -> HIDPPDeviceIdentity? {
+        identifiedDeviceIDs.append(device.id)
+        return identitiesByDeviceID[device.id]
+    }
+}
+
+private actor RacingWorkspaceHIDDiscovery: LogitechDeviceDiscovering {
+    let firstIdentity: HIDPPDeviceIdentity
+    let latestIdentity: HIDPPDeviceIdentity
+    private(set) var identifyCount = 0
+
+    init(firstIdentity: HIDPPDeviceIdentity, latestIdentity: HIDPPDeviceIdentity) {
+        self.firstIdentity = firstIdentity
+        self.latestIdentity = latestIdentity
+    }
+
+    nonisolated func updates() -> AsyncStream<[LogitechHIDDevice]> {
+        AsyncStream { $0.finish() }
+    }
+
+    func identify(_ device: LogitechHIDDevice) async -> HIDPPDeviceIdentity? {
+        _ = device
+        identifyCount += 1
+        if identifyCount == 1 {
+            try? await Task.sleep(for: .milliseconds(80))
+            return firstIdentity
+        }
+        return latestIdentity
+    }
+}
+
+private actor SwitchingWorkspaceHIDDiscovery: LogitechDeviceDiscovering {
+    private var currentIdentity: HIDPPDeviceIdentity
+    private var currentController: any HIDPPDeviceControlling
+    private(set) var identifyCount = 0
+
+    init(
+        identity: HIDPPDeviceIdentity,
+        controller: any HIDPPDeviceControlling
+    ) {
+        currentIdentity = identity
+        currentController = controller
+    }
+
+    nonisolated func updates() -> AsyncStream<[LogitechHIDDevice]> {
+        AsyncStream { $0.finish() }
+    }
+
+    func identify(_ device: LogitechHIDDevice) -> HIDPPDeviceIdentity? {
+        _ = device
+        identifyCount += 1
+        return currentIdentity
+    }
+
+    func controller(
+        for device: LogitechHIDDevice,
+        identity: HIDPPDeviceIdentity
+    ) -> (any HIDPPDeviceControlling)? {
+        _ = (device, identity)
+        return currentController
+    }
+
+    func use(
+        identity: HIDPPDeviceIdentity,
+        controller: any HIDPPDeviceControlling
+    ) {
+        currentIdentity = identity
+        currentController = controller
+    }
+}
+
 private actor RecoveringWorkspaceHIDDiscovery: LogitechDeviceDiscovering {
     let identity: HIDPPDeviceIdentity
     let controller: any HIDPPDeviceControlling
@@ -417,6 +500,92 @@ private actor WorkspaceHIDController: HIDPPDeviceControlling {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+}
+
+private actor DelayedHealthWorkspaceHIDController: HIDPPDeviceControlling {
+    let initialState: HIDPPDeviceState
+    let staleHealthState: HIDPPDeviceState
+    private var readCount = 0
+    private var healthReadContinuation: CheckedContinuation<Void, Never>?
+
+    init(initialState: HIDPPDeviceState, staleHealthState: HIDPPDeviceState) {
+        self.initialState = initialState
+        self.staleHealthState = staleHealthState
+    }
+
+    func readState(timeout: Duration) async -> HIDPPDeviceState {
+        _ = timeout
+        readCount += 1
+        guard readCount > 1 else { return initialState }
+        await withCheckedContinuation { continuation in
+            healthReadContinuation = continuation
+        }
+        return staleHealthState
+    }
+
+    func readBatteryState(timeout: Duration) -> HIDPPBatteryState? {
+        _ = timeout
+        return nil
+    }
+
+    func healthReadStarted() -> Bool { readCount > 1 }
+
+    func releaseHealthRead() {
+        healthReadContinuation?.resume()
+        healthReadContinuation = nil
+    }
+
+    func setDPI(_ dpi: Int, timeout: Duration) { _ = (dpi, timeout) }
+
+    func setSmartShift(
+        mode: SmartShiftMode,
+        automatic: Bool,
+        threshold: Int,
+        scrollForce: Int,
+        timeout: Duration
+    ) {
+        _ = (mode, automatic, threshold, scrollForce, timeout)
+    }
+
+    func setVerticalScrollInverted(_ inverted: Bool, timeout: Duration) {
+        _ = (inverted, timeout)
+    }
+
+    func setHorizontalScrollInverted(_ inverted: Bool, timeout: Duration) {
+        _ = (inverted, timeout)
+    }
+
+    func setHapticLevel(_ level: Int, timeout: Duration) { _ = (level, timeout) }
+
+    func playHapticWaveform(_ waveformID: Int, timeout: Duration) {
+        _ = (waveformID, timeout)
+    }
+
+    func setForceSensing(_ value: Int, timeout: Duration) { _ = (value, timeout) }
+}
+
+private enum WorkspaceReleaseCheckError: LocalizedError {
+    case staleFailure
+
+    var errorDescription: String? { "stale release check failed" }
+}
+
+private actor RacingWorkspaceReleaseChecker: ReleaseChecking {
+    let latest: MouserRelease
+    private(set) var requestCount = 0
+
+    init(latest: MouserRelease) {
+        self.latest = latest
+    }
+
+    func latestRelease() async throws -> MouserRelease {
+        requestCount += 1
+        if requestCount == 1 {
+            try await Task.sleep(for: .milliseconds(80))
+            throw WorkspaceReleaseCheckError.staleFailure
+        }
+        return latest
     }
 }
 
@@ -1198,8 +1367,14 @@ struct WorkspaceModelTests {
                 smartShiftThreshold: 10,
                 scrollForce: 10,
                 invertVerticalScroll: true,
+                invertHorizontalScroll: true,
                 wheelInversionBackend: .automatic,
-                forceSensitivity: nil
+                hapticsEnabled: false,
+                hapticStrength: 2,
+                forceSensitivity: nil,
+                specialInputButtons: [],
+                rawXYButtons: [],
+                specialInputReporting: [:]
             )
         }
 
@@ -1218,14 +1393,309 @@ struct WorkspaceModelTests {
                 scrollForce: 0
             ),
             battery: nil,
-            verticalScrollInverted: true
+            verticalScrollInverted: true,
+            horizontalScrollInverted: true
         )) == .healthy)
+        #expect(evaluate(HIDPPDeviceState(
+            dpi: 1600,
+            smartShift: HIDPPSmartShiftState(
+                mode: .ratchet,
+                automatic: false,
+                threshold: 25,
+                scrollForce: 0
+            ),
+            battery: nil,
+            verticalScrollInverted: true,
+            horizontalScrollInverted: false
+        )) == .needsRestore)
         #expect(evaluate(HIDPPDeviceState(
             dpi: nil,
             smartShift: nil,
             battery: HIDPPBatteryState(level: 80, charging: false),
             verticalScrollInverted: nil
         )) == .unavailable)
+        #expect(evaluate(HIDPPDeviceState(
+            dpi: 1600,
+            smartShift: nil,
+            battery: nil,
+            verticalScrollInverted: nil
+        )) == .unavailable)
+    }
+
+    @Test("HID health includes haptic level and live CID diversion flags")
+    func hidHealthChecksHapticAndSpecialInputReporting() {
+        let identity = HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 4",
+            featureIndexes: [
+                .haptic: 0x12,
+                .reprogrammableControlsV4: 0x05,
+            ]
+        )
+        func evaluate(
+            haptic: HIDPPHapticState?,
+            reporting: [MouseButton: HIDPPCIDReportingState]?
+        ) -> HIDPPSettingsHealth {
+            HIDPPSettingsHealthEvaluator.evaluate(
+                HIDPPDeviceState(
+                    dpi: nil,
+                    smartShift: nil,
+                    battery: nil,
+                    verticalScrollInverted: nil,
+                    haptic: haptic
+                ),
+                identity: identity,
+                dpi: 1600,
+                smartShiftEnabled: false,
+                smartShiftMode: .ratchet,
+                smartShiftThreshold: 25,
+                scrollForce: 50,
+                invertVerticalScroll: false,
+                invertHorizontalScroll: false,
+                wheelInversionBackend: .automatic,
+                hapticsEnabled: true,
+                hapticStrength: 2,
+                forceSensitivity: nil,
+                specialInputButtons: [.gesture, .modeShift],
+                rawXYButtons: [.gesture],
+                specialInputReporting: reporting
+            )
+        }
+
+        let healthyReporting: [MouseButton: HIDPPCIDReportingState] = [
+            .gesture: HIDPPCIDReportingState(cid: 0x00D7, flags: 0x11),
+            .modeShift: HIDPPCIDReportingState(cid: 0x00C4, flags: 0x01),
+        ]
+        #expect(
+            evaluate(
+                haptic: HIDPPHapticState(enabled: true, deviceLevel: 75),
+                reporting: healthyReporting
+            ) == .healthy
+        )
+        #expect(
+            evaluate(
+                haptic: HIDPPHapticState(enabled: true, deviceLevel: 50),
+                reporting: healthyReporting
+            ) == .needsRestore
+        )
+        #expect(
+            evaluate(
+                haptic: HIDPPHapticState(enabled: true, deviceLevel: 75),
+                reporting: [
+                    .gesture: HIDPPCIDReportingState(cid: 0x00D7, flags: 0x01),
+                    .modeShift: HIDPPCIDReportingState(cid: 0x00C4, flags: 0x01),
+                ]
+            ) == .needsRestore
+        )
+        #expect(
+            evaluate(
+                haptic: HIDPPHapticState(enabled: true, deviceLevel: 75),
+                reporting: nil
+            ) == .unavailable
+        )
+    }
+
+    @Test("HID probing falls back from an idle receiver to a direct Bluetooth interface")
+    func hidProbeFallsBackAcrossCandidates() async {
+        let directIdentity = HIDPPDeviceIdentity(
+            deviceIndex: 0xFF,
+            name: "MX Master 3S Bluetooth",
+            featureIndexes: [:]
+        )
+        let discovery = CandidateWorkspaceHIDDiscovery(
+            identitiesByDeviceID: [2: directIdentity]
+        )
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 1,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+            LogitechHIDDevice(
+                id: 2,
+                productID: 0xB034,
+                productName: "MX Master 3S",
+                transport: "Bluetooth Low Energy",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+
+        _ = await model.refreshHIDPPIdentity()
+
+        #expect(await discovery.identifiedDeviceIDs == [1, 2])
+        #expect(model.mouseConnected)
+        #expect(model.deviceName == directIdentity.name)
+        #expect(model.deviceTransport == "Bluetooth Low Energy")
+    }
+
+    @Test("a cancelled stale HID probe cannot overwrite a newer identity")
+    func staleHIDProbeCannotOverwriteNewerIdentity() async {
+        let firstIdentity = HIDPPDeviceIdentity(
+            deviceIndex: 1,
+            name: "Stale Mouse",
+            featureIndexes: [:]
+        )
+        let latestIdentity = HIDPPDeviceIdentity(
+            deviceIndex: 1,
+            name: "Current Mouse",
+            featureIndexes: [:]
+        )
+        let discovery = RacingWorkspaceHIDDiscovery(
+            firstIdentity: firstIdentity,
+            latestIdentity: latestIdentity
+        )
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 1,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+
+        let staleProbe = Task { await model.refreshHIDPPIdentity() }
+        for _ in 0..<100 where await discovery.identifyCount == 0 {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        let currentProbe = Task { await model.refreshHIDPPIdentity() }
+        _ = await currentProbe.value
+        _ = await staleProbe.value
+
+        #expect(await discovery.identifyCount == 2)
+        #expect(model.deviceName == latestIdentity.name)
+    }
+
+    @Test("a stale activity health read cannot recover over a newer HID controller")
+    func staleActivityHealthReadCannotRecoverNewController() async {
+        let oldIdentity = HIDPPDeviceIdentity(
+            deviceIndex: 1,
+            name: "Old Mouse",
+            featureIndexes: [.adjustableDPI: 0x0C]
+        )
+        let currentIdentity = HIDPPDeviceIdentity(
+            deviceIndex: 1,
+            name: "Current Mouse",
+            featureIndexes: [.adjustableDPI: 0x0C]
+        )
+        let oldController = DelayedHealthWorkspaceHIDController(
+            initialState: HIDPPDeviceState(
+                dpi: 1600,
+                smartShift: nil,
+                battery: nil,
+                verticalScrollInverted: nil
+            ),
+            staleHealthState: HIDPPDeviceState(
+                dpi: 800,
+                smartShift: nil,
+                battery: nil,
+                verticalScrollInverted: nil
+            )
+        )
+        let currentController = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: 1600,
+            smartShift: nil,
+            battery: nil,
+            verticalScrollInverted: nil
+        ))
+        let discovery = SwitchingWorkspaceHIDDiscovery(
+            identity: oldIdentity,
+            controller: oldController
+        )
+        let eventTap = WorkspaceTestEventTap()
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: eventTap,
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 1,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+        #expect(await model.refreshHIDPPIdentity())
+
+        eventTap.simulateDeviceActivity()
+        for _ in 0..<100 where !(await oldController.healthReadStarted()) {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(await oldController.healthReadStarted())
+
+        await discovery.use(identity: currentIdentity, controller: currentController)
+        #expect(await model.refreshHIDPPIdentity())
+        #expect(model.deviceName == currentIdentity.name)
+
+        await oldController.releaseHealthRead()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(await discovery.identifyCount == 2)
+        #expect(await currentController.calls.isEmpty)
+        #expect(model.deviceName == currentIdentity.name)
     }
 
     @Test("HID activity health checks are rate limited")
@@ -1238,6 +1708,56 @@ struct WorkspaceModelTests {
         #expect(initial)
         #expect(!throttled)
         #expect(afterInterval)
+    }
+
+    @Test("the latest overlapping update check owns the visible result")
+    func latestUpdateCheckWins() async {
+        let latestRelease = MouserRelease(
+            version: "4.1.0",
+            name: "Mouser 4.1.0",
+            notes: "",
+            releaseURL: URL(string: "https://github.com/Linmuge/Mouser/releases/tag/v4.1.0")!,
+            isPrerelease: false
+        )
+        let releaseChecker = RacingWorkspaceReleaseChecker(latest: latestRelease)
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1000,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            automaticallyChecksForUpdates: false,
+            currentVersion: "4.0.1",
+            profiles: [],
+            releaseChecker: releaseChecker
+        )
+
+        let staleCheck = Task { await model.checkForUpdates() }
+        for _ in 0..<100 where await releaseChecker.requestCount == 0 {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        let latestCheck = Task { await model.checkForUpdates() }
+        await latestCheck.value
+        await staleCheck.value
+
+        #expect(model.updateState == .available(latestRelease))
+    }
+
+    @Test("a structured updater failure is visible in both advanced update surfaces")
+    func reportsPreviousUpdateInstallFailure() {
+        let model = WorkspaceModel.preview
+
+        model.reportPreviousUpdateInstallFailure("更新包签名身份不匹配")
+
+        #expect(model.updateInstallStatusText == "上次更新失败：更新包签名身份不匹配")
     }
 
     @Test("mouse activity after late wake reapplies settings after unlock retries missed")
@@ -1468,6 +1988,116 @@ struct WorkspaceModelTests {
             .vertical(true),
             .horizontal(true),
         ])
+    }
+
+    @Test("HID++ recovery heartbeat retries identification after a failed probe")
+    func hidppRecoveryHeartbeatRetriesFailedIdentification() async {
+        let controller = WorkspaceHIDController(state: HIDPPDeviceState(
+            dpi: 1600,
+            smartShift: nil,
+            battery: nil,
+            verticalScrollInverted: nil
+        ))
+        let discovery = RecoveringWorkspaceHIDDiscovery(
+            identity: HIDPPDeviceIdentity(
+                deviceIndex: 0x01,
+                name: "MX Master 3",
+                featureIndexes: [.reprogrammableControlsV4: 0x09]
+            ),
+            controller: controller
+        )
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true,
+            hidppHeartbeatInterval: .milliseconds(30)
+        )
+        let receiver = LogitechHIDDevice(
+            id: 2,
+            productID: 0xC52B,
+            productName: "USB Receiver",
+            transport: "USB",
+            usagePage: 0xFF00,
+            usage: 1
+        )
+        model.applyDetectedDevices([receiver])
+
+        await model.refreshHIDPPIdentity()
+        #expect(!model.mouseConnected)
+
+        await discovery.makeDeviceAvailable()
+        let heartbeat = Task { await model.monitorHIDPPRecoveryHeartbeat() }
+        defer { heartbeat.cancel() }
+        for _ in 0..<100 where !model.mouseConnected {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(model.mouseConnected)
+        #expect(model.deviceName == "MX Master 3")
+    }
+
+    @Test("HID++ recovery heartbeat leaves an established connection alone")
+    func hidppRecoveryHeartbeatSkipsConnectedDevice() async {
+        let discovery = WorkspaceHIDDiscovery(identity: HIDPPDeviceIdentity(
+            deviceIndex: 0x01,
+            name: "MX Master 3",
+            featureIndexes: [.reprogrammableControlsV4: 0x09]
+        ))
+        let model = WorkspaceModel(
+            selectedProfileID: "default",
+            accessibilityGranted: true,
+            mouseConnected: false,
+            batteryLevel: 0,
+            dpi: 1600,
+            smartShiftEnabled: false,
+            smartShiftThreshold: 25,
+            invertVerticalScroll: false,
+            invertHorizontalScroll: false,
+            ignoreTrackpad: true,
+            hapticsEnabled: false,
+            hapticStrength: 0,
+            appearanceMode: .system,
+            profiles: [],
+            accessibilityAuthorizer: TrustedWorkspaceAuthorizer(),
+            eventTap: WorkspaceTestEventTap(),
+            deviceDiscovery: discovery,
+            nativeHIDProbeEnabled: true,
+            hidppHeartbeatInterval: .milliseconds(20)
+        )
+        model.applyDetectedDevices([
+            LogitechHIDDevice(
+                id: 2,
+                productID: 0xC52B,
+                productName: "USB Receiver",
+                transport: "USB",
+                usagePage: 0xFF00,
+                usage: 1
+            ),
+        ])
+        await model.refreshHIDPPIdentity()
+        #expect(model.mouseConnected)
+        let countAfterConnect = await discovery.identifyCount
+
+        let heartbeat = Task { await model.monitorHIDPPRecoveryHeartbeat() }
+        defer { heartbeat.cancel() }
+        try? await Task.sleep(for: .milliseconds(120))
+
+        #expect(await discovery.identifyCount == countAfterConnect)
     }
 
     @Test("initial HID discovery restores persisted settings instead of importing device defaults")

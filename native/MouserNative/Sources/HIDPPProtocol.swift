@@ -277,12 +277,36 @@ enum HIDPPCommands {
         )
     }
 
+    static func readThumbWheelStatus(featureIndex: UInt8) -> HIDPPCommand {
+        HIDPPCommand(featureIndex: featureIndex, function: 0x01, parameters: [])
+    }
+
+    static func parseThumbWheelInversion(parameters: [UInt8]) -> Bool? {
+        guard parameters.count >= 2 else { return nil }
+        return parameters[1] & 0x01 != 0
+    }
+
+    static func readHapticState(featureIndex: UInt8) -> HIDPPCommand {
+        HIDPPCommand(featureIndex: featureIndex, function: 0x01, parameters: [])
+    }
+
+    static func parseHapticState(parameters: [UInt8]) -> HIDPPHapticState? {
+        guard parameters.count >= 2, parameters[1] <= 100 else { return nil }
+        return HIDPPHapticState(
+            enabled: parameters[0] & 0x01 != 0,
+            deviceLevel: Int(parameters[1])
+        )
+    }
+
+    static func hapticDeviceLevel(for level: Int) -> Int {
+        [25, 50, 75, 100][level.clamped(to: 0...3)]
+    }
+
     static func setHapticLevel(featureIndex: UInt8, level: Int) -> HIDPPCommand {
-        let deviceLevels: [UInt8] = [25, 50, 75, 100]
         return HIDPPCommand(
             featureIndex: featureIndex,
             function: 0x02,
-            parameters: [0x01, deviceLevels[level.clamped(to: 0...3)]]
+            parameters: [0x01, UInt8(hapticDeviceLevel(for: level))]
         )
     }
 

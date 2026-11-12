@@ -36,6 +36,90 @@ private actor RecordingHIDPPRequester: HIDPPRequesting, HIDPPEventStreaming {
     }
 }
 
+private actor RestartableHIDPPRequester: HIDPPRequesting, HIDPPEventStreaming {
+    private var eventContinuations: [
+        AsyncThrowingStream<HIDPPResponse, any Error>.Continuation
+    ] = []
+    private(set) var commands: [HIDPPCommand] = []
+
+    func events() -> AsyncThrowingStream<HIDPPResponse, any Error> {
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: HIDPPResponse.self,
+            throwing: (any Error).self
+        )
+        eventContinuations.append(continuation)
+        return stream
+    }
+
+    func request(
+        _ command: HIDPPCommand,
+        deviceIndex: UInt8,
+        timeout: Duration
+    ) async throws -> HIDPPResponse {
+        commands.append(command)
+        return HIDPPResponse(
+            deviceIndex: deviceIndex,
+            featureIndex: command.featureIndex,
+            function: command.function,
+            softwareID: HIDPPCodec.softwareID,
+            parameters: command.parameters
+        )
+    }
+
+    func finishEventStream(at index: Int) {
+        eventContinuations[index].finish()
+    }
+}
+
+private actor BlockingSetupHIDPPRequester: HIDPPRequesting, HIDPPEventStreaming {
+    private var eventContinuations: [
+        AsyncThrowingStream<HIDPPResponse, any Error>.Continuation
+    ] = []
+    private var firstRequestContinuation: CheckedContinuation<Void, Never>?
+    private(set) var commands: [HIDPPCommand] = []
+
+    func events() -> AsyncThrowingStream<HIDPPResponse, any Error> {
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: HIDPPResponse.self,
+            throwing: (any Error).self
+        )
+        eventContinuations.append(continuation)
+        return stream
+    }
+
+    func request(
+        _ command: HIDPPCommand,
+        deviceIndex: UInt8,
+        timeout: Duration
+    ) async throws -> HIDPPResponse {
+        _ = timeout
+        commands.append(command)
+        if commands.count == 1 {
+            await withCheckedContinuation { continuation in
+                firstRequestContinuation = continuation
+            }
+        }
+        return HIDPPResponse(
+            deviceIndex: deviceIndex,
+            featureIndex: command.featureIndex,
+            function: command.function,
+            softwareID: HIDPPCodec.softwareID,
+            parameters: command.parameters
+        )
+    }
+
+    func firstRequestIsBlocked() -> Bool { firstRequestContinuation != nil }
+
+    func releaseFirstRequest() {
+        firstRequestContinuation?.resume()
+        firstRequestContinuation = nil
+    }
+
+    func finishEventStream(at index: Int) {
+        eventContinuations[index].finish()
+    }
+}
+
 @Suite("HID++ device controller")
 struct HIDPPDeviceControllerTests {
     @Test("reads every available setting into one partial device snapshot")
@@ -47,6 +131,8 @@ struct HIDPPDeviceControllerTests {
                 .adjustableDPI: 0x0C,
                 .smartShift: 0x0D,
                 .highResolutionWheelEnhanced: 0x0E,
+                .thumbWheel: 0x0F,
+                .haptic: 0x12,
                 .batteryStatus: 0x08,
             ]
         )
@@ -54,6 +140,8 @@ struct HIDPPDeviceControllerTests {
             HIDPPCommands.readDPI(featureIndex: 0x0C): Self.response(0x0C, [0x00, 0x06, 0x40]),
             HIDPPCommands.readSmartShift(featureIndex: 0x0D, enhanced: false): Self.response(0x0D, [0x02, 25, 0]),
             HIDPPCommands.readWheelMode(featureIndex: 0x0E): Self.response(0x0E, [0x06]),
+            HIDPPCommands.readThumbWheelStatus(featureIndex: 0x0F): Self.response(0x0F, [0x00, 0x01]),
+            HIDPPCommands.readHapticState(featureIndex: 0x12): Self.response(0x12, [0x01, 75, 0x01]),
             HIDPPCommands.readBattery(featureIndex: 0x08, unified: false): Self.response(0x08, [82, 0, 0]),
         ])
         let controller = HIDPPDeviceController(requester: requester, identity: identity)
@@ -71,6 +159,8 @@ struct HIDPPDeviceControllerTests {
         )
         #expect(state.battery == HIDPPBatteryState(level: 82, charging: false))
         #expect(state.verticalScrollInverted == true)
+        #expect(state.horizontalScrollInverted == true)
+        #expect(state.haptic == HIDPPHapticState(enabled: true, deviceLevel: 75))
     }
 
     @Test("vertical inversion performs a read-modify-write and preserves high resolution")
@@ -204,8 +294,8 @@ struct HIDPPDeviceControllerTests {
             count: Self.response(0x05, [2]),
             first: Self.response(0x05, [0x01, 0xA0, 0, 1, 0x20, 1, 1, 1, 0x01]),
             second: Self.response(0x05, [0x00, 0xFD, 0, 2, 0x20, 2, 1, 1, 0]),
-            firstReporting: Self.response(0x05, [0x01, 0xA0, 0x10, 0x01, 0xA0, 0]),
-            secondReporting: Self.response(0x05, [0x00, 0xFD, 0x00, 0x00, 0xFD, 0]),
+            firstReporting: Self.response(0x05, [0x01, 0xA0, 0x11, 0x01, 0xA0, 0]),
+            secondReporting: Self.response(0x05, [0x00, 0xFD, 0x01, 0x00, 0xFD, 0]),
         ])
         let controller = HIDPPDeviceController(
             requester: requester,
@@ -220,19 +310,27 @@ struct HIDPPDeviceControllerTests {
                 cid: 0x01A0,
                 taskID: 1,
                 flags: 0x0120,
-                mappingFlags: 0x0010
+                mappingFlags: 0x0011
             ),
             HIDPPReprogrammableControl(
                 index: 1,
                 cid: 0x00FD,
                 taskID: 2,
                 flags: 0x0020,
-                mappingFlags: 0
+                mappingFlags: 0x0001
             ),
         ])
         #expect(controls[0].isDivertable)
         #expect(controls[0].supportsRawXY)
         #expect(!controls[1].supportsRawXY)
+
+        let reporting = await controller.readSpecialInputReporting(
+            for: [.actionsRing, .dpiSwitch]
+        )
+        #expect(reporting == [
+            .actionsRing: HIDPPCIDReportingState(cid: 0x01A0, flags: 0x11),
+            .dpiSwitch: HIDPPCIDReportingState(cid: 0x00FD, flags: 0x01),
+        ])
     }
 
     @Test("special buttons are persistently diverted, streamed, and restored")
@@ -326,6 +424,154 @@ struct HIDPPDeviceControllerTests {
         #expect(await requester.commands == [divert, restore])
     }
 
+    @Test("a discovered 0x00D7 gesture control is diverted and routed")
+    func routesDiscoveredD7GestureControl() async throws {
+        let count = HIDPPCommands.readReprogrammableControlCount(featureIndex: 0x05)
+        let control = HIDPPCommands.readReprogrammableControl(featureIndex: 0x05, index: 0)
+        let reporting = HIDPPCommands.readCIDReporting(featureIndex: 0x05, cid: 0x00D7)
+        let divert = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00D7,
+            mode: .divertButton
+        )
+        let restore = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00D7,
+            mode: .restoreButton
+        )
+        let requester = RecordingHIDPPRequester(
+            responses: [
+                count: Self.response(0x05, [1]),
+                control: Self.response(0x05, [0x00, 0xD7, 0, 1, 0x20, 0, 0, 0, 0]),
+                reporting: Self.response(0x05, [0x00, 0xD7, 0, 0x00, 0xD7, 0]),
+                divert: Self.response(0x05, divert.parameters),
+                restore: Self.response(0x05, restore.parameters),
+            ],
+            eventResponses: [
+                Self.event(0x05, [0x00, 0xD7, 0x00, 0x00]),
+                Self.event(0x05, [0x00, 0x00]),
+            ]
+        )
+        let controller = HIDPPDeviceController(
+            requester: requester,
+            identity: Self.identity(features: [.reprogrammableControlsV4: 0x05])
+        )
+
+        let controls = await controller.readReprogrammableControls()
+        #expect(controls.map(\.cid) == [0x00D7])
+
+        let stream = try await controller.specialButtonEvents(
+            for: [.gesture],
+            timeout: .seconds(1)
+        )
+        var events: [HIDPPButtonEvent] = []
+        for try await event in stream { events.append(event) }
+
+        #expect(events == [
+            .init(button: .gesture, isPressed: true),
+            .init(button: .gesture, isPressed: false),
+        ])
+        #expect(await requester.commands == [count, control, reporting, divert, restore])
+    }
+
+    @Test("ending an old special-input stream cannot restore over its replacement")
+    func restartDoesNotLetOldStreamRestoreNewDiversion() async throws {
+        let divert = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00C3,
+            mode: .divertButton
+        )
+        let restore = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00C3,
+            mode: .restoreButton
+        )
+        let requester = RestartableHIDPPRequester()
+        let controller = HIDPPDeviceController(
+            requester: requester,
+            identity: Self.identity(features: [.reprogrammableControlsV4: 0x05])
+        )
+
+        let firstStream = try await controller.specialInputEvents(
+            for: [.gesture],
+            rawXYButtons: [],
+            timeout: .seconds(1)
+        )
+        let secondStream = try await controller.specialInputEvents(
+            for: [.gesture],
+            rawXYButtons: [],
+            timeout: .seconds(1)
+        )
+        _ = (firstStream, secondStream)
+        #expect(await requester.commands == [divert, divert])
+
+        await requester.finishEventStream(at: 0)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await requester.commands == [divert, divert])
+
+        await requester.finishEventStream(at: 1)
+        await Self.waitForCommandCount(3, requester: requester)
+        #expect(await requester.commands == [divert, divert, restore])
+    }
+
+    @Test("a setup cancelled while waiting for ownership never diverts firmware")
+    func cancelledWaitingSetupDoesNotDivert() async throws {
+        let divert = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00C3,
+            mode: .divertButton
+        )
+        let restore = HIDPPCommands.setCIDReporting(
+            featureIndex: 0x05,
+            cid: 0x00C3,
+            mode: .restoreButton
+        )
+        let requester = BlockingSetupHIDPPRequester()
+        let controller = HIDPPDeviceController(
+            requester: requester,
+            identity: Self.identity(features: [.reprogrammableControlsV4: 0x05])
+        )
+
+        let firstSetup = Task {
+            try await controller.specialInputEvents(
+                for: [.gesture],
+                rawXYButtons: [],
+                timeout: .seconds(1)
+            )
+        }
+        for _ in 0..<100 where !(await requester.firstRequestIsBlocked()) {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(await requester.firstRequestIsBlocked())
+
+        let cancelledSetup = Task {
+            try await controller.specialInputEvents(
+                for: [.gesture],
+                rawXYButtons: [],
+                timeout: .seconds(1)
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(10))
+        cancelledSetup.cancel()
+        await requester.releaseFirstRequest()
+
+        let firstStream = try await firstSetup.value
+        do {
+            _ = try await cancelledSetup.value
+            Issue.record("cancelled setup unexpectedly returned a stream")
+        } catch is CancellationError {
+            // Expected: cancellation is rechecked after the ownership wait.
+        } catch {
+            Issue.record("cancelled setup failed with unexpected error: \(error)")
+        }
+        #expect(await requester.commands == [divert])
+
+        await requester.finishEventStream(at: 0)
+        for try await _ in firstStream {}
+        await Self.waitForCommandCount(2, requester: requester)
+        #expect(await requester.commands == [divert, restore])
+    }
+
     private static func identity(features: [HIDPPFeature: UInt8]) -> HIDPPDeviceIdentity {
         HIDPPDeviceIdentity(deviceIndex: 0x01, name: "MX Master 3", featureIndexes: features)
     }
@@ -353,5 +599,25 @@ struct HIDPPDeviceControllerTests {
             softwareID: 0,
             parameters: parameters
         )
+    }
+
+    private static func waitForCommandCount(
+        _ expectedCount: Int,
+        requester: RestartableHIDPPRequester
+    ) async {
+        for _ in 0..<100 {
+            if await requester.commands.count >= expectedCount { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    private static func waitForCommandCount(
+        _ expectedCount: Int,
+        requester: BlockingSetupHIDPPRequester
+    ) async {
+        for _ in 0..<100 {
+            if await requester.commands.count >= expectedCount { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
     }
 }

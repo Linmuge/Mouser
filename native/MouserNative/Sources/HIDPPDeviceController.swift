@@ -5,7 +5,40 @@ struct HIDPPDeviceState: Equatable, Sendable {
     let smartShift: HIDPPSmartShiftState?
     let battery: HIDPPBatteryState?
     let verticalScrollInverted: Bool?
-    var forceSensing: HIDPPForceSensingState? = nil
+    let horizontalScrollInverted: Bool?
+    let haptic: HIDPPHapticState?
+    let forceSensing: HIDPPForceSensingState?
+
+    init(
+        dpi: Int?,
+        smartShift: HIDPPSmartShiftState?,
+        battery: HIDPPBatteryState?,
+        verticalScrollInverted: Bool?,
+        horizontalScrollInverted: Bool? = nil,
+        haptic: HIDPPHapticState? = nil,
+        forceSensing: HIDPPForceSensingState? = nil
+    ) {
+        self.dpi = dpi
+        self.smartShift = smartShift
+        self.battery = battery
+        self.verticalScrollInverted = verticalScrollInverted
+        self.horizontalScrollInverted = horizontalScrollInverted
+        self.haptic = haptic
+        self.forceSensing = forceSensing
+    }
+}
+
+struct HIDPPHapticState: Equatable, Sendable {
+    let enabled: Bool
+    let deviceLevel: Int
+}
+
+struct HIDPPCIDReportingState: Equatable, Sendable {
+    let cid: UInt16
+    let flags: UInt8
+
+    var isTemporarilyDiverted: Bool { flags & 0x01 != 0 }
+    var isRawXYDiverted: Bool { flags & 0x10 != 0 }
 }
 
 struct HIDPPForceSensingState: Equatable, Sendable {
@@ -38,6 +71,95 @@ enum HIDPPDeviceControlError: Error, Equatable {
     case eventStreamUnavailable
 }
 
+private actor HIDPPReprogrammableControlCache {
+    private var controls: [HIDPPReprogrammableControl]?
+
+    func load() -> [HIDPPReprogrammableControl]? { controls }
+
+    func store(_ controls: [HIDPPReprogrammableControl]) {
+        self.controls = controls
+    }
+}
+
+private actor HIDPPSpecialInputStreamOwnership {
+    private var nextGeneration: UInt64 = 0
+    private var activeGeneration: UInt64?
+    private var operationInFlight = false
+    private var operationWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func beginSetup() async throws -> UInt64 {
+        await acquireOperation()
+        do {
+            try Task.checkCancellation()
+        } catch {
+            releaseOperation()
+            throw error
+        }
+        nextGeneration &+= 1
+        activeGeneration = nextGeneration
+        return nextGeneration
+    }
+
+    func finishSetup(_ generation: UInt64) {
+        precondition(activeGeneration == generation)
+        releaseOperation()
+    }
+
+    func abortSetup(_ generation: UInt64) {
+        if activeGeneration == generation {
+            activeGeneration = nil
+        }
+        releaseOperation()
+    }
+
+    func beginRestore(_ generation: UInt64) async -> Bool {
+        await acquireOperation()
+        guard activeGeneration == generation else {
+            releaseOperation()
+            return false
+        }
+        return true
+    }
+
+    func finishRestore(_ generation: UInt64) {
+        if activeGeneration == generation {
+            activeGeneration = nil
+        }
+        releaseOperation()
+    }
+
+    func beginInspection() async -> Bool {
+        await acquireOperation()
+        guard !Task.isCancelled else {
+            releaseOperation()
+            return false
+        }
+        return true
+    }
+
+    func finishInspection() {
+        releaseOperation()
+    }
+
+    private func acquireOperation() async {
+        guard operationInFlight else {
+            operationInFlight = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            operationWaiters.append(continuation)
+        }
+    }
+
+    private func releaseOperation() {
+        guard !operationWaiters.isEmpty else {
+            operationInFlight = false
+            return
+        }
+        operationWaiters.removeFirst().resume()
+    }
+}
+
 protocol HIDPPDeviceControlling: Sendable {
     func readState(timeout: Duration) async -> HIDPPDeviceState
     func readBatteryState(timeout: Duration) async -> HIDPPBatteryState?
@@ -57,6 +179,10 @@ protocol HIDPPDeviceControlling: Sendable {
     func readReprogrammableControls(
         timeout: Duration
     ) async -> [HIDPPReprogrammableControl]
+    func readSpecialInputReporting(
+        for buttons: Set<MouseButton>,
+        timeout: Duration
+    ) async -> [MouseButton: HIDPPCIDReportingState]?
     func specialButtonEvents(
         for buttons: Set<MouseButton>,
         timeout: Duration
@@ -78,6 +204,14 @@ extension HIDPPDeviceControlling {
     ) async -> [HIDPPReprogrammableControl] {
         _ = timeout
         return []
+    }
+
+    func readSpecialInputReporting(
+        for buttons: Set<MouseButton>,
+        timeout: Duration
+    ) async -> [MouseButton: HIDPPCIDReportingState]? {
+        _ = timeout
+        return buttons.isEmpty ? [:] : nil
     }
 
     func specialButtonEvents(
@@ -103,10 +237,14 @@ extension HIDPPDeviceControlling {
 
 struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
     private let requester: any HIDPPRequesting
+    private let controlCache: HIDPPReprogrammableControlCache
+    private let streamOwnership: HIDPPSpecialInputStreamOwnership
     let identity: HIDPPDeviceIdentity
 
     init(requester: any HIDPPRequesting, identity: HIDPPDeviceIdentity) {
         self.requester = requester
+        controlCache = HIDPPReprogrammableControlCache()
+        streamOwnership = HIDPPSpecialInputStreamOwnership()
         self.identity = identity
     }
 
@@ -116,6 +254,8 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
             smartShift: await readSmartShift(timeout: timeout),
             battery: await readBattery(timeout: timeout),
             verticalScrollInverted: await readVerticalScrollInversion(timeout: timeout),
+            horizontalScrollInverted: await readHorizontalScrollInversion(timeout: timeout),
+            haptic: await readHapticState(timeout: timeout),
             forceSensing: await readForceSensing(timeout: timeout)
         )
     }
@@ -284,7 +424,46 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
                 mappingFlags: mappingFlags
             ))
         }
+        await controlCache.store(controls)
         return controls
+    }
+
+    func readSpecialInputReporting(
+        for buttons: Set<MouseButton>,
+        timeout: Duration = .seconds(2)
+    ) async -> [MouseButton: HIDPPCIDReportingState]? {
+        guard !buttons.isEmpty else { return [:] }
+        guard let featureIndex = identity.featureIndexes[.reprogrammableControlsV4],
+              await streamOwnership.beginInspection()
+        else { return nil }
+
+        let buttonsByCID = Self.resolveSpecialButtons(
+            buttons,
+            from: await controlCache.load()
+        )
+        var reportingByButton: [MouseButton: HIDPPCIDReportingState] = [:]
+        if Set(buttonsByCID.values) == buttons {
+            for cid in buttonsByCID.keys.sorted() {
+                guard let button = buttonsByCID[cid],
+                      let response = try? await requester.request(
+                        HIDPPCommands.readCIDReporting(featureIndex: featureIndex, cid: cid),
+                        deviceIndex: identity.deviceIndex,
+                        timeout: timeout
+                      ),
+                      response.parameters.count >= 3
+                else {
+                    reportingByButton.removeAll()
+                    break
+                }
+                reportingByButton[button] = HIDPPCIDReportingState(
+                    cid: cid,
+                    flags: response.parameters[2]
+                )
+            }
+        }
+
+        await streamOwnership.finishInspection()
+        return reportingByButton.count == buttons.count ? reportingByButton : nil
     }
 
     private func readForceSensing(timeout: Duration) async -> HIDPPForceSensingState? {
@@ -335,7 +514,8 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
         )
         let (stream, continuation) = AsyncThrowingStream.makeStream(
             of: HIDPPButtonEvent.self,
-            throwing: (any Error).self
+            throwing: (any Error).self,
+            bufferingPolicy: .bufferingNewest(64)
         )
         let task = Task.detached {
             do {
@@ -363,13 +543,22 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
         guard let eventStreamer = requester as? any HIDPPEventStreaming else {
             throw HIDPPDeviceControlError.eventStreamUnavailable
         }
-        let buttonsByCID = Self.specialButtonsByCID.filter { buttons.contains($0.value) }
+        let buttonsByCID = Self.resolveSpecialButtons(
+            buttons,
+            from: await controlCache.load()
+        )
         guard !buttonsByCID.isEmpty else {
             return AsyncThrowingStream { $0.finish() }
         }
 
+        let generation = try await streamOwnership.beginSetup()
         var restoreModes: [UInt16: HIDPPCIDReportingMode] = [:]
+        let responses: AsyncThrowingStream<HIDPPResponse, any Error>
         do {
+            // Subscribe before changing firmware reporting so an immediate
+            // button transition cannot fall into the setup gap.
+            responses = try await eventStreamer.events()
+            try Task.checkCancellation()
             for cid in buttonsByCID.keys.sorted() {
                 let button = buttonsByCID[cid]
                 let rawXY = button.map(rawXYButtons.contains) ?? false
@@ -383,23 +572,27 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
                     timeout: timeout
                 )
                 restoreModes[cid] = rawXY ? .restoreRawXY : .restoreButton
+                try Task.checkCancellation()
             }
+            await streamOwnership.finishSetup(generation)
         } catch {
-            await restoreCIDs(restoreModes, featureIndex: featureIndex, timeout: timeout)
+            let controller = self
+            await Task.detached {
+                await controller.abortStreamSetup(
+                    generation: generation,
+                    restoreModes: restoreModes,
+                    featureIndex: featureIndex,
+                    timeout: timeout
+                )
+            }.value
             throw error
         }
-
-        let responses: AsyncThrowingStream<HIDPPResponse, any Error>
-        do {
-            responses = try await eventStreamer.events()
-        } catch {
-            await restoreCIDs(restoreModes, featureIndex: featureIndex, timeout: timeout)
-            throw error
-        }
+        let streamRestoreModes = restoreModes
 
         let (stream, continuation) = AsyncThrowingStream.makeStream(
             of: HIDPPSpecialInputEvent.self,
-            throwing: (any Error).self
+            throwing: (any Error).self,
+            bufferingPolicy: .bufferingNewest(128)
         )
         let controller = self
         let task = Task.detached {
@@ -407,6 +600,7 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
                 featureIndex: featureIndex,
                 buttonsByCID: buttonsByCID
             )
+            var terminalError: (any Error)?
             do {
                 for try await response in responses {
                     guard !Task.isCancelled else { break }
@@ -414,23 +608,50 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
                         continuation.yield(event)
                     }
                 }
-                await controller.restoreCIDs(
-                    restoreModes,
-                    featureIndex: featureIndex,
-                    timeout: timeout
-                )
-                continuation.finish()
             } catch {
-                await controller.restoreCIDs(
-                    restoreModes,
+                terminalError = error
+            }
+
+            // Consumer cancellation also cancels this worker. Run firmware
+            // cleanup in a fresh task so cancellation cannot suppress restore.
+            await Task.detached {
+                await controller.restoreCIDsIfOwned(
+                    generation: generation,
+                    streamRestoreModes,
                     featureIndex: featureIndex,
                     timeout: timeout
                 )
-                continuation.finish(throwing: error)
+            }.value
+
+            if let terminalError, !Task.isCancelled {
+                continuation.finish(throwing: terminalError)
+            } else {
+                continuation.finish()
             }
         }
         continuation.onTermination = { _ in task.cancel() }
         return stream
+    }
+
+    private func abortStreamSetup(
+        generation: UInt64,
+        restoreModes: [UInt16: HIDPPCIDReportingMode],
+        featureIndex: UInt8,
+        timeout: Duration
+    ) async {
+        await restoreCIDs(restoreModes, featureIndex: featureIndex, timeout: timeout)
+        await streamOwnership.abortSetup(generation)
+    }
+
+    private func restoreCIDsIfOwned(
+        generation: UInt64,
+        _ modes: [UInt16: HIDPPCIDReportingMode],
+        featureIndex: UInt8,
+        timeout: Duration
+    ) async {
+        guard await streamOwnership.beginRestore(generation) else { return }
+        await restoreCIDs(modes, featureIndex: featureIndex, timeout: timeout)
+        await streamOwnership.finishRestore(generation)
     }
 
     private func restoreCIDs(
@@ -452,7 +673,36 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
         }
     }
 
-    private static let specialButtonsByCID: [UInt16: MouseButton] = [
+    private static func resolveSpecialButtons(
+        _ buttons: Set<MouseButton>,
+        from controls: [HIDPPReprogrammableControl]?
+    ) -> [UInt16: MouseButton] {
+        guard let controls else {
+            return legacySpecialButtonsByCID.filter { buttons.contains($0.value) }
+        }
+
+        var result: [UInt16: MouseButton] = [:]
+        var selectedButtons: Set<MouseButton> = []
+        for control in controls.sorted(by: { $0.index < $1.index }) {
+            guard control.isDivertable,
+                  let button = knownSpecialButtonsByCID[control.cid],
+                  buttons.contains(button),
+                  selectedButtons.insert(button).inserted
+            else { continue }
+            result[control.cid] = button
+        }
+        return result
+    }
+
+    private static let knownSpecialButtonsByCID: [UInt16: MouseButton] = [
+        0x00C3: .gesture,
+        0x00D7: .gesture,
+        0x00C4: .modeShift,
+        0x01A0: .actionsRing,
+        0x00FD: .dpiSwitch,
+    ]
+
+    private static let legacySpecialButtonsByCID: [UInt16: MouseButton] = [
         0x00C3: .gesture,
         0x00C4: .modeShift,
         0x01A0: .actionsRing,
@@ -525,5 +775,27 @@ struct HIDPPDeviceController: HIDPPDeviceControlling, Sendable {
               let mode = response.parameters.first
         else { return nil }
         return mode & 0x04 != 0
+    }
+
+    private func readHorizontalScrollInversion(timeout: Duration) async -> Bool? {
+        guard let featureIndex = identity.featureIndexes[.thumbWheel],
+              let response = try? await requester.request(
+                HIDPPCommands.readThumbWheelStatus(featureIndex: featureIndex),
+                deviceIndex: identity.deviceIndex,
+                timeout: timeout
+              )
+        else { return nil }
+        return HIDPPCommands.parseThumbWheelInversion(parameters: response.parameters)
+    }
+
+    private func readHapticState(timeout: Duration) async -> HIDPPHapticState? {
+        guard let featureIndex = identity.featureIndexes[.haptic],
+              let response = try? await requester.request(
+                HIDPPCommands.readHapticState(featureIndex: featureIndex),
+                deviceIndex: identity.deviceIndex,
+                timeout: timeout
+              )
+        else { return nil }
+        return HIDPPCommands.parseHapticState(parameters: response.parameters)
     }
 }

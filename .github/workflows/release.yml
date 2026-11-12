@@ -14,47 +14,262 @@ on:
         default: ""
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag || github.sha }}
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   MOUSER_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag || '' }}
   MOUSER_GIT_COMMIT: ${{ github.sha }}
   MOUSER_GIT_DIRTY: "false"
+  MOUSER_WINDOWS_PUBLISHER: "Xingtai Muge Information Technology Co., Ltd."
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - name: Validate release identity and immutable tag target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag || '' }}
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            exit 0
+          fi
+          test "$GITHUB_REPOSITORY" = "Linmuge/Mouser"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tag_exists=false
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            tag_exists=true
+            tag_target="$(git rev-list -n 1 "$RELEASE_TAG")"
+            test "$tag_target" = "$GITHUB_SHA"
+          fi
+          if release_json="$(gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,targetCommitish 2>/dev/null)"; then
+            test "$(jq -r .isDraft <<<"$release_json")" = "true"
+            if [ "$tag_exists" = "false" ]; then
+              draft_target="$(jq -r .targetCommitish <<<"$release_json")"
+              draft_target_sha=""
+              for ref in \
+                  "$draft_target" \
+                  "refs/heads/$draft_target" \
+                  "refs/remotes/origin/$draft_target"; do
+                if draft_target_sha="$(git rev-parse --verify --quiet \
+                    --end-of-options "${ref}^{commit}" 2>/dev/null)"; then
+                  break
+                fi
+              done
+              test -n "$draft_target_sha"
+              test "$draft_target_sha" = "$GITHUB_SHA"
+            fi
+          fi
+
+  quality-python:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-util1 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xkb1
+
+      - name: Install locked release dependencies
+        run: |
+          python -m pip install --require-hashes --force-reinstall --no-deps -r requirements-release-build.txt
+          python -m pip install --require-hashes --no-build-isolation -r requirements-release.txt
+
+      - name: Run Python quality gate
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m compileall -q main_qml.py core ui tools
+          python -m unittest discover -s tests -p "test_*.py"
+
+  build-windows:
+    needs: [preflight, quality-python]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install locked release dependencies
+        run: |
+          python -m pip install --require-hashes --force-reinstall --no-deps -r requirements-release-build.txt
+          python -m pip install --require-hashes --no-build-isolation -r requirements-release.txt
+
+      - name: Run Windows tests
+        run: |
+          python -m compileall -q main_qml.py core ui tools
+          python -m unittest discover -s tests -p "test_*.py"
 
       - name: Build with PyInstaller
-        run: pyinstaller Mouser.spec --noconfirm
+        run: python -m PyInstaller Mouser.spec --noconfirm
+
+      - name: Sign and verify Windows binaries
+        if: env.MOUSER_VERSION != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "Release signing requires WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD"
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "mouser-release-signing.pfx"
+          $catalogPath = Join-Path $env:RUNNER_TEMP "Mouser-Contents.cat"
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificatePath,
+              [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+            )
+            $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if (-not $signTool) { throw "signtool.exe was not found" }
+            $binaries = Get-ChildItem dist\Mouser -Recurse -File |
+              Where-Object { $_.Extension -in '.exe', '.dll' }
+            if (-not $binaries) { throw "No Windows binaries were produced" }
+            foreach ($binary in $binaries) {
+              & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $binary.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Failed to sign $($binary.FullName)" }
+              & $signTool.FullName verify /pa /all $binary.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Failed to verify $($binary.FullName)" }
+              $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
+              if ($null -eq $signature -or $null -eq $signature.SignerCertificate) {
+                throw "No Authenticode signer certificate for $($binary.FullName)"
+              }
+              $publisher = $signature.SignerCertificate.GetNameInfo(
+                [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+                $false
+              )
+              if ($signature.Status -ne 'Valid' -or $publisher -ne $env:MOUSER_WINDOWS_PUBLISHER) {
+                throw "Unexpected Authenticode publisher for $($binary.FullName): $publisher"
+              }
+            }
+            $bundlePath = (Resolve-Path -LiteralPath "dist\Mouser").Path
+            New-FileCatalog `
+              -Path $bundlePath `
+              -CatalogFilePath $catalogPath `
+              -CatalogVersion 2.0 | Out-Null
+            $securePassword = ConvertTo-SecureString `
+              $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = Get-PfxCertificate `
+              -FilePath $certificatePath `
+              -Password $securePassword
+            if ($null -eq $certificate -or -not $certificate.HasPrivateKey) {
+              throw "The Windows signing certificate could not be loaded"
+            }
+            $catalogSigning = Set-AuthenticodeSignature `
+              -LiteralPath $catalogPath `
+              -Certificate $certificate `
+              -HashAlgorithm SHA256 `
+              -TimestampServer http://timestamp.digicert.com
+            if ($null -eq $catalogSigning -or $catalogSigning.Status -ne 'Valid') {
+              throw "Failed to sign the Windows content catalog"
+            }
+            $catalogSignature = Get-AuthenticodeSignature -LiteralPath $catalogPath
+            if ($null -eq $catalogSignature -or
+                $null -eq $catalogSignature.SignerCertificate) {
+              throw "The Windows content catalog has no signer certificate"
+            }
+            $catalogPublisher = $catalogSignature.SignerCertificate.GetNameInfo(
+              [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+              $false
+            )
+            if ($catalogSignature.Status -ne 'Valid' -or
+                $catalogPublisher -ne $env:MOUSER_WINDOWS_PUBLISHER) {
+              throw "Unexpected content catalog publisher: $catalogPublisher"
+            }
+            $bundledCatalog = Join-Path $bundlePath "Mouser-Contents.cat"
+            Copy-Item -LiteralPath $catalogPath -Destination $bundledCatalog
+            $catalogValidation = Test-FileCatalog `
+              -CatalogFilePath $bundledCatalog `
+              -Path $bundlePath `
+              -FilesToSkip "Mouser-Contents.cat" `
+              -Detailed
+            if ($null -eq $catalogValidation -or
+                $catalogValidation.Status -ne 'Valid' -or
+                $catalogValidation.HashAlgorithm -ne 'SHA256') {
+              throw "The signed Windows content catalog failed validation"
+            }
+          } finally {
+            Remove-Item $certificatePath -Force -ErrorAction SilentlyContinue
+            Remove-Item $catalogPath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Create archive
         run: Compress-Archive -Path dist\Mouser -DestinationPath Mouser-Windows.zip
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Mouser-Windows
           path: Mouser-Windows.zip
 
   build-macos:
     name: build-macos-native
+    needs: [preflight, quality-python]
     runs-on: [self-hosted, macOS, mouser-release]
     timeout-minutes: 90
+    environment: release-signing
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run native quality gate
+        working-directory: native/MouserNative
+        shell: bash
+        run: |
+          xcodegen generate
+          xcodebuild test \
+            -project MouserNative.xcodeproj \
+            -scheme MouserNative \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Build, sign and notarize native universal DMGs
-        shell: zsh
+        shell: bash
         run: |
           version="${MOUSER_VERSION#v}"
           output_dir="$RUNNER_TEMP/mouser-native-$version"
@@ -65,17 +280,22 @@ jobs:
           mkdir -p native-release-assets
           cp "$output_dir"/Mouser-*.dmg native-release-assets/
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Mouser-macOS
           path: native-release-assets/Mouser-*.dmg
 
   build-linux:
+    needs: [preflight, quality-python]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -95,11 +315,20 @@ jobs:
             libxcb-shape0 \
             libxcb-xkb1
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install locked release dependencies
+        run: |
+          python -m pip install --require-hashes --force-reinstall --no-deps -r requirements-release-build.txt
+          python -m pip install --require-hashes --no-build-isolation -r requirements-release.txt
+
+      - name: Run Linux tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m compileall -q main_qml.py core ui tools
+          python -m unittest discover -s tests -p "test_*.py"
 
       - name: Build with PyInstaller
-        run: pyinstaller Mouser-linux.spec --noconfirm
+        run: python -m PyInstaller Mouser-linux.spec --noconfirm
 
       - name: Audit Linux bundle dependencies
         run: |
@@ -201,7 +430,7 @@ jobs:
       - name: Create archive
         run: cd dist && zip -r -y ../Mouser-Linux.zip Mouser
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Mouser-Linux
           path: Mouser-Linux.zip
@@ -210,14 +439,20 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
+    environment: release-publishing
+    permissions:
+      contents: write
     env:
       RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -234,7 +469,7 @@ jobs:
             --asset-dir update-assets \
             --output "mouser-${{ env.RELEASE_TAG }}-update.json"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Mouser-Update-Metadata
           path: mouser-${{ env.RELEASE_TAG }}-update.json
@@ -244,7 +479,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "${{ env.RELEASE_TAG }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
-            # Release already exists — just upload the assets
+            is_draft="$(gh release view "${{ env.RELEASE_TAG }}" \
+              --repo "${{ github.repository }}" \
+              --json isDraft --jq .isDraft)"
+            test "$is_draft" = "true"
+            # Assets may only be replaced while the release is still a draft.
             gh release upload "${{ env.RELEASE_TAG }}" \
               --repo "${{ github.repository }}" \
               --clobber \
@@ -252,6 +491,10 @@ jobs:
               Mouser-macOS/Mouser-*.dmg \
               Mouser-Linux/Mouser-Linux.zip \
               mouser-${{ env.RELEASE_TAG }}-update.json
+            gh release edit "${{ env.RELEASE_TAG }}" \
+              --repo "${{ github.repository }}" \
+              --target "$GITHUB_SHA" \
+              --draft=false
           else
             # Checked-in notes win over auto-generated ones; a workflow_dispatch
             # run also creates the tag here (--target), since tag pushes are
@@ -272,3 +515,11 @@ jobs:
               Mouser-Linux/Mouser-Linux.zip \
               mouser-${{ env.RELEASE_TAG }}-update.json
           fi
+          git fetch --force origin \
+            "refs/tags/${{ env.RELEASE_TAG }}:refs/tags/${{ env.RELEASE_TAG }}"
+          published_target="$(git rev-list -n 1 "${{ env.RELEASE_TAG }}")"
+          test "$published_target" = "$GITHUB_SHA"
+          published_draft="$(gh release view "${{ env.RELEASE_TAG }}" \
+            --repo "${{ github.repository }}" \
+            --json isDraft --jq .isDraft)"
+          test "$published_draft" = "false"

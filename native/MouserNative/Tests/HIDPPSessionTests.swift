@@ -30,6 +30,40 @@ private actor ScriptedHIDPPTransport: HIDPPReportTransport {
     }
 }
 
+private actor ControllableHIDPPTransport: HIDPPReportTransport {
+    private var continuations: [
+        UUID: AsyncThrowingStream<[UInt8], any Error>.Continuation
+    ] = [:]
+    private(set) var sentReports: [[UInt8]] = []
+
+    func reports() -> AsyncThrowingStream<[UInt8], any Error> {
+        let id = UUID()
+        let (stream, continuation) = AsyncThrowingStream.makeStream(
+            of: [UInt8].self,
+            throwing: (any Error).self
+        )
+        continuations[id] = continuation
+        continuation.onTermination = { _ in
+            Task { await self.removeContinuation(id) }
+        }
+        return stream
+    }
+
+    func send(_ report: [UInt8]) {
+        sentReports.append(report)
+    }
+
+    func yield(_ report: [UInt8]) {
+        for continuation in continuations.values {
+            continuation.yield(report)
+        }
+    }
+
+    private func removeContinuation(_ id: UUID) {
+        continuations.removeValue(forKey: id)
+    }
+}
+
 private actor SimulatedHIDPPRequester: HIDPPRequesting {
     let featureIndexes: [UInt8: [HIDPPFeature: UInt8]]
     let names: [UInt8: String]
@@ -166,7 +200,7 @@ struct HIDPPSessionTests {
     @Test("matching HID++ error responses surface their device error code")
     func requestSurfacesDeviceError() async {
         let transport = ScriptedHIDPPTransport(scriptedReports: [
-            [0x11, 0x01, 0xFF, 0x0A, 0x05, 0x07],
+            [0x11, 0x01, 0xFF, 0x05, 0x3A, 0x07],
         ])
         let session = HIDPPSession(transport: transport)
 
@@ -177,6 +211,68 @@ struct HIDPPSessionTests {
                 timeout: .seconds(1)
             )
         }
+    }
+
+    @Test("an HID++ error for another function does not fail the active request")
+    func ignoresDeviceErrorForAnotherFunction() async throws {
+        let transport = ScriptedHIDPPTransport(scriptedReports: [
+            [0x11, 0x01, 0xFF, 0x05, 0x2A, 0x07],
+            [0x11, 0x01, 0x05, 0x3A, 0x12, 0x34],
+        ])
+        let session = HIDPPSession(transport: transport)
+
+        let response = try await session.request(
+            HIDPPCommand(featureIndex: 0x05, function: 0x03, parameters: []),
+            deviceIndex: 0x01,
+            timeout: .seconds(1)
+        )
+
+        #expect(response.parameters == [0x12, 0x34])
+    }
+
+    @Test("concurrent requests are single-flight and cannot consume the same response")
+    func serializesConcurrentRequests() async throws {
+        let transport = ControllableHIDPPTransport()
+        let session = HIDPPSession(transport: transport)
+        let firstCommand = HIDPPCommand(
+            featureIndex: 0x05,
+            function: 0x03,
+            parameters: [0x01]
+        )
+        let secondCommand = HIDPPCommand(
+            featureIndex: 0x05,
+            function: 0x03,
+            parameters: [0x02]
+        )
+
+        let first = Task {
+            try await session.request(
+                firstCommand,
+                deviceIndex: 0x01,
+                timeout: .seconds(1)
+            )
+        }
+        await Self.waitForSentReportCount(1, transport: transport)
+
+        let second = Task {
+            try await session.request(
+                secondCommand,
+                deviceIndex: 0x01,
+                timeout: .seconds(1)
+            )
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await transport.sentReports.count == 1)
+
+        await transport.yield([0x11, 0x01, 0x05, 0x3A, 0xA1])
+        #expect(try await first.value.parameters == [0xA1])
+
+        await Self.waitForSentReportCount(2, transport: transport)
+        await transport.yield([0x11, 0x01, 0x05, 0x3A, 0xB2])
+        #expect(try await second.value.parameters == [0xB2])
+
+        let sent = await transport.sentReports
+        #expect(sent.map { $0[4] } == [0x01, 0x02])
     }
 
     @Test("requests stop at their deadline when no response arrives")
@@ -241,5 +337,15 @@ struct HIDPPSessionTests {
         #expect(indexes.first == 0x01)
         #expect(indexes.contains(0x02))
         #expect(!indexes.contains(0x03))
+    }
+
+    private static func waitForSentReportCount(
+        _ expectedCount: Int,
+        transport: ControllableHIDPPTransport
+    ) async {
+        for _ in 0..<100 {
+            if await transport.sentReports.count >= expectedCount { return }
+            try? await Task.sleep(for: .milliseconds(2))
+        }
     }
 }

@@ -18,13 +18,19 @@ import sys
 import tempfile
 import time
 import urllib.request
+import uuid
 import zipfile
 
+from core.updater import DEFAULT_RELEASE_REPO
 from core.version import APP_VERSION
 
 
 APP_ID = "io.github.tombadash.mouser"
 STABLE_CHANNEL = "stable"
+WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER = (
+    "Xingtai Muge Information Technology Co., Ltd."
+)
+WINDOWS_CONTENT_CATALOG_NAME = "Mouser-Contents.cat"
 MANIFEST_SCHEMA_VERSION = 1
 DEFAULT_MANIFEST_NAME = "mouser-v{version}-update.json"
 DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 120.0
@@ -36,6 +42,15 @@ _WINDOWS_WAIT_TIMEOUT = 0x00000102
 _WINDOWS_WAIT_FAILED = 0xFFFFFFFF
 _WINDOWS_ERROR_ACCESS_DENIED = 5
 _WINDOWS_ERROR_INVALID_PARAMETER = 87
+_GITHUB_REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_COMMIT_RE = re.compile(r"[0-9a-fA-F]{40}")
+_STATIC_ASSET_NAMES = {
+    "windows-x64": frozenset({"Mouser-Windows.zip"}),
+    "windows-arm64": frozenset({"Mouser-Windows-arm64.zip"}),
+    "macos-arm64": frozenset({"Mouser-macOS.zip"}),
+    "macos-x86_64": frozenset({"Mouser-macOS-intel.zip"}),
+    "linux-x64": frozenset({"Mouser-Linux.zip"}),
+}
 
 
 class UpdateInstallError(Exception):
@@ -45,6 +60,188 @@ class UpdateInstallError(Exception):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+def verify_windows_authenticode(
+    executable: str | os.PathLike,
+    *,
+    sys_platform: str | None = None,
+    runner=None,
+) -> str | None:
+    """Require a valid Authenticode signature from Mouser's legal publisher.
+
+    The check runs after extraction and again in the detached install helper,
+    closing the gap where a staged executable could be swapped before install.
+    Non-Windows callers return ``None`` so archive tests remain portable.
+    """
+    if not (sys_platform or sys.platform).startswith("win"):
+        return None
+
+    target = Path(executable).resolve()
+    if not target.is_file():
+        raise UpdateInstallError(
+            "invalid_signature", "The staged Mouser executable is missing."
+        )
+    script = r"""
+$ErrorActionPreference = 'Stop'
+$signature = Get-AuthenticodeSignature -LiteralPath $env:MOUSER_AUTHENTICODE_TARGET
+if ($null -eq $signature -or $null -eq $signature.SignerCertificate) {
+    throw 'The executable has no signer certificate.'
+}
+$publisher = $signature.SignerCertificate.GetNameInfo(
+    [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+    $false
+)
+[PSCustomObject]@{
+    status = $signature.Status.ToString()
+    publisher = $publisher
+    thumbprint = $signature.SignerCertificate.Thumbprint
+} | ConvertTo-Json -Compress
+"""
+    env = dict(os.environ)
+    env["MOUSER_AUTHENTICODE_TARGET"] = str(target)
+    try:
+        result = (runner or subprocess.run)(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise UpdateInstallError(
+            "invalid_signature", "The update signature could not be verified."
+        ) from exc
+    if result.returncode != 0:
+        raise UpdateInstallError(
+            "invalid_signature", "The update has an invalid Authenticode signature."
+        )
+    try:
+        payload = json.loads(result.stdout.strip())
+        status = str(payload.get("status") or "")
+        publisher = str(payload.get("publisher") or "")
+        thumbprint = str(payload.get("thumbprint") or "").upper()
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise UpdateInstallError(
+            "invalid_signature", "The update signer identity could not be read."
+        ) from exc
+    if (
+        status != "Valid"
+        or publisher != WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER
+        or not re.fullmatch(r"[0-9A-F]{40}|[0-9A-F]{64}", thumbprint)
+    ):
+        raise UpdateInstallError(
+            "invalid_signature", "The update publisher identity does not match Mouser."
+        )
+    return thumbprint
+
+
+def verify_windows_content_catalog(
+    app_root: str | os.PathLike,
+    *,
+    sys_platform: str | None = None,
+    runner=None,
+) -> str | None:
+    """Verify the signed Windows catalog and every staged onedir file."""
+    if not (sys_platform or sys.platform).startswith("win"):
+        return None
+
+    root = Path(app_root).resolve()
+    catalog = root / WINDOWS_CONTENT_CATALOG_NAME
+    if not root.is_dir() or not catalog.is_file():
+        raise UpdateInstallError(
+            "invalid_content_catalog",
+            "The staged update content catalog is missing.",
+        )
+    script = rf"""
+$ErrorActionPreference = 'Stop'
+$catalogRoot = [IO.Path]::GetFullPath($env:MOUSER_CATALOG_ROOT)
+$catalogName = '{WINDOWS_CONTENT_CATALOG_NAME}'
+$catalogPath = Join-Path $catalogRoot $catalogName
+$signature = Get-AuthenticodeSignature -LiteralPath $catalogPath
+if ($null -eq $signature -or $null -eq $signature.SignerCertificate) {{
+    throw 'The content catalog has no signer certificate.'
+}}
+$publisher = $signature.SignerCertificate.GetNameInfo(
+    [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+    $false
+)
+$validation = Test-FileCatalog `
+    -CatalogFilePath $catalogPath `
+    -Path $catalogRoot `
+    -FilesToSkip $catalogName `
+    -Detailed
+if ($null -eq $validation) {{
+    throw 'The content catalog did not return a validation result.'
+}}
+[PSCustomObject]@{{
+    catalog_status = $validation.Status.ToString()
+    hash_algorithm = $validation.HashAlgorithm.ToString()
+    signature_status = $signature.Status.ToString()
+    publisher = $publisher
+    thumbprint = $signature.SignerCertificate.Thumbprint
+}} | ConvertTo-Json -Compress
+"""
+    env = dict(os.environ)
+    env["MOUSER_CATALOG_ROOT"] = str(root)
+    try:
+        result = (runner or subprocess.run)(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise UpdateInstallError(
+            "invalid_content_catalog",
+            "The update content catalog could not be verified.",
+        ) from exc
+    if result.returncode != 0:
+        raise UpdateInstallError(
+            "invalid_content_catalog",
+            "The update content catalog is invalid.",
+        )
+    try:
+        payload = json.loads(result.stdout.strip())
+        catalog_status = str(payload.get("catalog_status") or "")
+        hash_algorithm = str(payload.get("hash_algorithm") or "")
+        signature_status = str(payload.get("signature_status") or "")
+        publisher = str(payload.get("publisher") or "")
+        thumbprint = str(payload.get("thumbprint") or "").upper()
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise UpdateInstallError(
+            "invalid_content_catalog",
+            "The update content catalog result could not be read.",
+        ) from exc
+    if (
+        catalog_status != "Valid"
+        or hash_algorithm.upper() != "SHA256"
+        or signature_status != "Valid"
+        or publisher != WINDOWS_EXPECTED_AUTHENTICODE_PUBLISHER
+        or not re.fullmatch(r"[0-9A-F]{40}|[0-9A-F]{64}", thumbprint)
+    ):
+        raise UpdateInstallError(
+            "invalid_content_catalog",
+            "The update content catalog or publisher identity is invalid.",
+        )
+    return thumbprint
 
 
 @dataclass(frozen=True)
@@ -164,6 +361,11 @@ def build_number_from_version(version: str) -> int:
     if not match:
         raise UpdateInstallError("invalid_version", "Version must be major.minor.patch.")
     major, minor, patch = (int(part) for part in match.groups())
+    if minor >= 100 or patch >= 100:
+        raise UpdateInstallError(
+            "invalid_version",
+            "Minor and patch versions must be between 0 and 99.",
+        )
     return major * 10000 + minor * 100 + patch
 
 
@@ -179,6 +381,71 @@ def manifest_name_for_version(version: str) -> str:
     return DEFAULT_MANIFEST_NAME.format(version=value)
 
 
+def _canonical_tag_for_version(version: str) -> str:
+    value = str(version or "").strip()
+    build_number_from_version(value)
+    if value.startswith("v"):
+        value = value[1:]
+    return f"v{value}"
+
+
+def _validated_repo(repo: str) -> str:
+    value = str(repo or "").strip()
+    segments = value.split("/")
+    if (
+        not _GITHUB_REPO_RE.fullmatch(value)
+        or len(segments) != 2
+        or any(
+            segment in {".", ".."}
+            or segment.startswith((".", "-"))
+            or segment.endswith((".", "-"))
+            for segment in segments
+        )
+    ):
+        raise UpdateInstallError("invalid_repo", "Update repository is invalid.")
+    return value
+
+
+def _allowed_asset_names(platform_key: str, version: str | None = None) -> set[str]:
+    allowed = set(_STATIC_ASSET_NAMES.get(platform_key, ()))
+    if platform_key in {"macos-arm64", "macos-x86_64"}:
+        if version is None:
+            return allowed
+        normalized = str(version or "").removeprefix("v")
+        build_number_from_version(normalized)
+        allowed.add(f"Mouser-{normalized}.dmg")
+    return allowed
+
+
+def _validate_asset_name(
+    platform_key: str,
+    name: str,
+    *,
+    version: str | None = None,
+) -> str:
+    value = str(name or "").strip()
+    if (
+        not value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+        or "\x00" in value
+        or Path(value).is_absolute()
+        or re.match(r"^[A-Za-z]:", value)
+    ):
+        raise UpdateInstallError("unsafe_asset_name", "Update asset name is unsafe.")
+    allowed = _allowed_asset_names(platform_key, version)
+    if version is None and platform_key in {"macos-arm64", "macos-x86_64"}:
+        if re.fullmatch(r"Mouser-\d+\.\d+\.\d+\.dmg", value):
+            return value
+    if value not in allowed:
+        raise UpdateInstallError(
+            "unexpected_asset_name",
+            "Update asset name is not allowed for this platform.",
+        )
+    return value
+
+
 def _parse_datetime(value: str) -> float:
     text = str(value or "").strip()
     if text.endswith("Z"):
@@ -192,22 +459,38 @@ def _parse_datetime(value: str) -> float:
     return parsed.timestamp()
 
 
-def _asset_from_payload(platform_key: str, data) -> UpdateAsset:
+def _asset_from_payload(
+    platform_key: str,
+    data,
+    *,
+    version: str,
+    tag: str,
+    repo: str,
+) -> UpdateAsset:
     if not isinstance(data, dict):
         raise UpdateInstallError("missing_asset", "Selected update asset is missing.")
     name = str(data.get("name") or "").strip()
     url = str(data.get("url") or "").strip()
     sha256 = str(data.get("sha256") or "").strip().lower()
-    try:
-        size = int(data.get("size"))
-    except (TypeError, ValueError) as exc:
-        raise UpdateInstallError("missing_asset_size", "Selected update asset size is missing.") from exc
+    size_payload = data.get("size")
+    if isinstance(size_payload, bool) or not isinstance(size_payload, int):
+        raise UpdateInstallError(
+            "missing_asset_size", "Selected update asset size is missing."
+        )
+    size = size_payload
     if not name or not url or not sha256:
         raise UpdateInstallError("missing_asset_fields", "Selected update asset is incomplete.")
     if size <= 0:
         raise UpdateInstallError("missing_asset_size", "Selected update asset size is invalid.")
     if not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise UpdateInstallError("invalid_sha256", "Selected update asset checksum is invalid.")
+    name = _validate_asset_name(platform_key, name, version=version)
+    expected_url = f"https://github.com/{repo}/releases/download/{tag}/{name}"
+    if url != expected_url:
+        raise UpdateInstallError(
+            "asset_url_mismatch",
+            "Update asset URL does not match the selected release.",
+        )
     return UpdateAsset(platform_key, name, url, size, sha256)
 
 
@@ -217,41 +500,78 @@ def verify_update_manifest(
     platform_key: str,
     now: float | None = None,
     highest_trusted_build: int | None = None,
+    expected_tag: str | None = None,
+    expected_repo: str = DEFAULT_RELEASE_REPO,
 ) -> UpdateManifest:
     if not isinstance(payload, dict):
         raise UpdateInstallError("invalid_metadata", "Release metadata is not valid.")
     payload = payload.get("payload", payload)
     if not isinstance(payload, dict):
         raise UpdateInstallError("invalid_metadata", "Release metadata is incomplete.")
-    if int(payload.get("schema", 0)) != MANIFEST_SCHEMA_VERSION:
+    schema = payload.get("schema", 0)
+    if (
+        isinstance(schema, bool)
+        or not isinstance(schema, int)
+        or schema != MANIFEST_SCHEMA_VERSION
+    ):
         raise UpdateInstallError("unsupported_schema", "Release metadata schema is not supported.")
     if str(payload.get("app_id") or "") != APP_ID:
         raise UpdateInstallError("wrong_app", "Release metadata is for a different app.")
     if str(payload.get("channel") or "") != STABLE_CHANNEL:
         raise UpdateInstallError("wrong_channel", "Release metadata is for a different channel.")
-    expires_at = str(payload.get("expires_at") or "")
-    if _parse_datetime(expires_at) <= (time.time() if now is None else float(now)):
-        raise UpdateInstallError("expired_metadata", "Release metadata has expired.")
+    # Schema v1 manifests are checksum manifests, not signed timestamped
+    # metadata.  Keep accepting the legacy expiry field (and validate its
+    # syntax), but do not make immutable GitHub releases stop working merely
+    # because their old 30-day advisory TTL elapsed.
+    expires_at = str(payload.get("expires_at") or "").strip()
+    if expires_at:
+        _parse_datetime(expires_at)
     version = str(payload.get("version") or "").strip()
     tag = str(payload.get("tag") or "").strip()
     commit = str(payload.get("commit") or "").strip()
     release_notes_url = str(payload.get("release_notes_url") or "").strip()
     if not version or not tag or not commit or not release_notes_url:
         raise UpdateInstallError("missing_metadata_fields", "Release metadata is incomplete.")
-    try:
-        build_number = int(payload.get("build_number"))
-    except (TypeError, ValueError) as exc:
-        raise UpdateInstallError("missing_build_number", "Release metadata build number is missing.") from exc
-    if build_number < build_number_from_version(version):
+    build_number = payload.get("build_number")
+    if isinstance(build_number, bool) or not isinstance(build_number, int):
+        raise UpdateInstallError(
+            "missing_build_number", "Release metadata build number is missing."
+        )
+    canonical_tag = _canonical_tag_for_version(version)
+    if tag != canonical_tag:
+        raise UpdateInstallError("tag_mismatch", "Release metadata tag does not match its version.")
+    if expected_tag is not None and tag != _canonical_tag_for_version(expected_tag):
+        raise UpdateInstallError("tag_mismatch", "Release metadata is for a different release.")
+    repo = _validated_repo(expected_repo)
+    if release_notes_url != f"https://github.com/{repo}/releases/tag/{tag}":
+        raise UpdateInstallError(
+            "release_url_mismatch",
+            "Release notes URL does not match the selected release.",
+        )
+    if not _COMMIT_RE.fullmatch(commit):
+        raise UpdateInstallError("invalid_commit", "Release commit is invalid.")
+    if build_number != build_number_from_version(version):
         raise UpdateInstallError("invalid_build_number", "Release metadata build number is invalid.")
     if highest_trusted_build is not None and build_number < int(highest_trusted_build):
         raise UpdateInstallError("older_build", "Release metadata is older than the trusted version.")
     assets_payload = payload.get("assets")
     if not isinstance(assets_payload, dict):
         raise UpdateInstallError("missing_assets", "Release metadata has no assets.")
-    selected = _asset_from_payload(platform_key, assets_payload.get(platform_key))
+    selected = _asset_from_payload(
+        platform_key,
+        assets_payload.get(platform_key),
+        version=version,
+        tag=tag,
+        repo=repo,
+    )
     assets = {
-        str(key): _asset_from_payload(str(key), value)
+        str(key): _asset_from_payload(
+            str(key),
+            value,
+            version=version,
+            tag=tag,
+            repo=repo,
+        )
         for key, value in assets_payload.items()
     }
     assets[selected.platform] = selected
@@ -271,20 +591,29 @@ def verify_update_manifest(
 
 def platform_key(sys_platform: str | None = None, machine: str | None = None) -> str:
     system = sys_platform or sys.platform
-    arch = (machine or platform.machine() or "").lower()
+    arch = str(platform.machine() if machine is None else machine).strip().lower()
+    x64_arches = {"amd64", "x86_64", "x64"}
+    arm64_arches = {"arm64", "aarch64"}
+    safe_arch = re.sub(r"[^a-z0-9_+-]+", "-", arch).strip("-") or "unknown"
     if system.startswith("win"):
-        if arch in {"arm64", "aarch64"}:
+        if arch in arm64_arches:
             return "windows-arm64"
-        return "windows-x64"
+        if arch in x64_arches:
+            return "windows-x64"
+        return f"windows-{safe_arch}"
     if system == "darwin":
-        if arch in {"arm64", "aarch64"}:
+        if arch in arm64_arches:
             return "macos-arm64"
-        return "macos-x86_64"
+        if arch in x64_arches:
+            return "macos-x86_64"
+        return f"macos-{safe_arch}"
     if system.startswith("linux"):
-        if arch in {"arm64", "aarch64"}:
+        if arch in arm64_arches:
             return "linux-arm64"
-        return "linux-x64"
-    return f"{system}-{arch or 'unknown'}"
+        if arch in x64_arches:
+            return "linux-x64"
+        return f"linux-{safe_arch}"
+    return f"{system}-{safe_arch}"
 
 
 def sha256_file(path: str | os.PathLike) -> str:
@@ -326,10 +655,16 @@ def download_to_file(
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     success = False
+    created = False
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             total = 0
-            with open(target_path, "wb") as out:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+            descriptor = os.open(target_path, flags, 0o600)
+            created = True
+            with os.fdopen(descriptor, "wb") as out:
                 while True:
                     if _cancelled(cancel_event):
                         raise UpdateInstallError("cancelled", "Update cancelled.")
@@ -345,9 +680,14 @@ def download_to_file(
                     out.write(chunk)
                     if progress_callback:
                         progress_callback(total)
+            if expected_size is not None and total != int(expected_size):
+                raise UpdateInstallError(
+                    "size_mismatch",
+                    "Downloaded update size does not match.",
+                )
         success = True
     finally:
-        if not success:
+        if created and not success:
             try:
                 target_path.unlink()
             except OSError:
@@ -364,7 +704,9 @@ def fetch_json(url: str, *, timeout: float = 10.0):
         return json.loads(response.read().decode("utf-8-sig"))
 
 
-def manifest_url_for_release(tag: str, repo: str = "TomBadash/Mouser") -> str:
+def manifest_url_for_release(tag: str, repo: str = DEFAULT_RELEASE_REPO) -> str:
+    tag = _canonical_tag_for_version(tag)
+    repo = _validated_repo(repo)
     override = os.environ.get(_UPDATE_MANIFEST_URL_ENV, "").strip()
     if override:
         return override
@@ -374,17 +716,21 @@ def manifest_url_for_release(tag: str, repo: str = "TomBadash/Mouser") -> str:
 def fetch_update_manifest_for_release(
     tag: str,
     *,
-    repo: str = "TomBadash/Mouser",
+    repo: str = DEFAULT_RELEASE_REPO,
     target_platform: str | None = None,
     timeout: float = 10.0,
     highest_trusted_build: int | None = None,
 ) -> UpdateManifest:
+    tag = _canonical_tag_for_version(tag)
+    repo = _validated_repo(repo)
     key = target_platform or platform_key()
     payload = fetch_json(manifest_url_for_release(tag, repo), timeout=timeout)
     return verify_update_manifest(
         payload,
         platform_key=key,
         highest_trusted_build=highest_trusted_build,
+        expected_tag=tag,
+        expected_repo=repo,
     )
 
 
@@ -533,12 +879,23 @@ def same_volume_windows_stage_dir(
     tag: str,
     *,
     pid: int | None = None,
+    operation_id: str | None = None,
 ) -> Path:
     root = Path(install_root).resolve()
     safe_tag = re.sub(r"[^A-Za-z0-9._-]+", "-", str(tag or "update")).strip(".-")
     if not safe_tag:
         safe_tag = "update"
-    return root.with_name(f".{root.name}.update-{safe_tag}-{pid or os.getpid()}")
+    suffix = f"{safe_tag}-{pid or os.getpid()}"
+    if operation_id:
+        safe_operation_id = re.sub(
+            r"[^A-Za-z0-9_-]+", "", str(operation_id)
+        )[:64]
+        if not safe_operation_id:
+            raise UpdateInstallError(
+                "invalid_operation_id", "Update operation identifier is invalid."
+            )
+        suffix = f"{suffix}-{safe_operation_id}"
+    return root.with_name(f".{root.name}.update-{suffix}")
 
 
 def _probe_directory_writable(directory: Path) -> bool:
@@ -973,6 +1330,8 @@ def apply_windows_update_from_state(
     try:
         plan = read_windows_update_plan(path)
         validated = validate_windows_update_plan(plan, state_path=path)
+        verify_windows_authenticode(validated.staged_root / plan.executable_name)
+        verify_windows_content_catalog(validated.staged_root)
     except Exception as exc:
         _write_update_result(
             safe_marker,
@@ -1068,17 +1427,46 @@ def prepare_downloaded_asset(
     cancel_event=None,
     progress_callback=None,
 ) -> Path:
+    asset_name = _validate_asset_name(asset.platform, asset.name)
     root = Path(download_dir or tempfile.mkdtemp(prefix="mouser-update-download-"))
-    target = root / asset.name
-    download_to_file(
-        asset.url,
-        target,
-        timeout=timeout,
-        expected_size=asset.size,
-        cancel_event=cancel_event,
-        progress_callback=progress_callback,
-    )
-    if _cancelled(cancel_event):
-        raise UpdateInstallError("cancelled", "Update cancelled.")
-    verify_file(target, expected_sha256=asset.sha256, expected_size=asset.size)
-    return target
+    root.mkdir(parents=True, exist_ok=True)
+    root = root.resolve()
+    target_candidate = root / asset_name
+    if target_candidate.is_symlink():
+        raise UpdateInstallError(
+            "unsafe_asset_path",
+            "Update asset path escapes the download directory.",
+        )
+    target = target_candidate.resolve(strict=False)
+    if target.parent != root:
+        raise UpdateInstallError(
+            "unsafe_asset_path",
+            "Update asset path escapes the download directory.",
+        )
+    temporary = root / f".{asset_name}.{uuid.uuid4().hex}.part"
+    completed = False
+    try:
+        download_to_file(
+            asset.url,
+            temporary,
+            timeout=timeout,
+            expected_size=asset.size,
+            cancel_event=cancel_event,
+            progress_callback=progress_callback,
+        )
+        if _cancelled(cancel_event):
+            raise UpdateInstallError("cancelled", "Update cancelled.")
+        verify_file(
+            temporary,
+            expected_sha256=asset.sha256,
+            expected_size=asset.size,
+        )
+        os.replace(temporary, target)
+        completed = True
+        return target
+    finally:
+        if not completed:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass

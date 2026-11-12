@@ -55,14 +55,22 @@ final class MouserAppDelegate: NSObject, NSApplicationDelegate {
         guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else {
             return
         }
-        MacUpdateInstallHelper.cleanupCompletedInstall()
+        if case let .failed(message)? = MacUpdateInstallHelper.cleanupCompletedInstall() {
+            model.reportPreviousUpdateInstallFailure(message)
+        }
         runtimeTask = Task { [weak self] in
             guard let self else { return }
             await model.bootstrap()
-            if model.startMinimized {
+            if model.shouldStartMinimizedAfterBootstrap {
                 await Task.yield()
                 for window in NSApp.windows where window.canBecomeMain {
                     window.orderOut(nil)
+                }
+            } else if model.shouldPresentSettingsAfterBootstrap {
+                await Task.yield()
+                if let window = NSApp.windows.first(where: \.canBecomeMain) {
+                    window.makeKeyAndOrderFront(nil)
+                    NSApp.activate(ignoringOtherApps: true)
                 }
             }
 
@@ -70,6 +78,7 @@ final class MouserAppDelegate: NSObject, NSApplicationDelegate {
                 group.addTask { await self.model.monitorAccessibility() }
                 group.addTask { await self.model.monitorLogitechDevices() }
                 group.addTask { await self.model.monitorConsoleLock() }
+                group.addTask { await self.model.monitorHIDPPRecoveryHeartbeat() }
                 await group.waitForAll()
             }
         }

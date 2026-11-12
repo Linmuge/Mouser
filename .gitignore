@@ -38,6 +38,9 @@ Desktop.ini
 # Build artifacts
 build_icon.py
 design-demos/
+/release-notarized-*/
+/release-staging-*/
+/native/MouserNative/release-*/
 
 # Shortcuts (user-specific paths)
 *.lnk

@@ -26,6 +26,8 @@ enum HIDPPSessionError: Error, Equatable {
 actor HIDPPSession: HIDPPRequesting, HIDPPEventStreaming {
     private let transport: any HIDPPReportTransport
     private let softwareID: UInt8
+    private var requestInFlight = false
+    private var requestWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(
         transport: any HIDPPReportTransport,
@@ -40,6 +42,10 @@ actor HIDPPSession: HIDPPRequesting, HIDPPEventStreaming {
         deviceIndex: UInt8,
         timeout: Duration = .seconds(2)
     ) async throws -> HIDPPResponse {
+        await acquireRequestSlot()
+        defer { releaseRequestSlot() }
+        try Task.checkCancellation()
+
         let responseStream = try await transport.reports()
         let requestReport = try HIDPPCodec.encodeRequest(
             deviceIndex: deviceIndex,
@@ -55,15 +61,17 @@ actor HIDPPSession: HIDPPRequesting, HIDPPEventStreaming {
             group.addTask {
                 for try await bytes in responseStream {
                     guard let response = try? HIDPPCodec.decodeResponse(bytes),
-                          response.deviceIndex == deviceIndex,
-                          response.softwareID == responseSoftwareID
+                          response.deviceIndex == deviceIndex
                     else { continue }
 
-                    if response.isError,
-                       response.parameters.first == command.featureIndex
-                    {
+                    if Self.matchesError(
+                        response,
+                        command: command,
+                        softwareID: responseSoftwareID
+                    ) {
                         throw HIDPPSessionError.deviceError(response.errorCode ?? 0)
                     }
+                    guard response.softwareID == responseSoftwareID else { continue }
                     if HIDPPCodec.matches(
                         response,
                         featureIndex: command.featureIndex,
@@ -90,7 +98,7 @@ actor HIDPPSession: HIDPPRequesting, HIDPPEventStreaming {
 
     func events() async throws -> AsyncThrowingStream<HIDPPResponse, any Error> {
         let reports = try await transport.reports()
-        return AsyncThrowingStream { continuation in
+        return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(64)) { continuation in
             let task = Task {
                 do {
                     for try await bytes in reports {
@@ -106,6 +114,42 @@ actor HIDPPSession: HIDPPRequesting, HIDPPEventStreaming {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private func acquireRequestSlot() async {
+        guard requestInFlight else {
+            requestInFlight = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(continuation)
+        }
+    }
+
+    private func releaseRequestSlot() {
+        guard !requestWaiters.isEmpty else {
+            requestInFlight = false
+            return
+        }
+        requestWaiters.removeFirst().resume()
+    }
+
+    private static func matchesError(
+        _ response: HIDPPResponse,
+        command: HIDPPCommand,
+        softwareID: UInt8
+    ) -> Bool {
+        guard response.isError, response.parameters.count >= 2 else { return false }
+
+        // HID++ 2.0 error reports repurpose the normal FAP fields:
+        // byte 3 contains the failed feature index and byte 4 contains the
+        // failed function plus software ID. Match both so a delayed error from
+        // another request cannot terminate the current request.
+        let failedFeatureIndex = response.function << 4 | response.softwareID
+        let failedFunctionAndSoftwareID = response.parameters[0]
+        let expectedFunctionAndSoftwareID = command.function << 4 | softwareID
+        return failedFeatureIndex == command.featureIndex &&
+            failedFunctionAndSoftwareID == expectedFunctionAndSoftwareID
     }
 }
 

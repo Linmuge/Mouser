@@ -4,15 +4,46 @@
 # uinput. uaccess grants the active local desktop session access through
 # logind without making Mouser run as root.
 
-# Logitech HID++ over USB receivers and Bluetooth.
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="0003:046D:*", TAG+="uaccess"
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="0005:046D:*", TAG+="uaccess"
+# Logitech HID++ receiver vendor interfaces. Restricting the USB interface
+# protocol avoids granting access to keyboard collections paired to a receiver.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="0003:0000046D:0000C52B", ATTRS{bInterfaceProtocol}=="00", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="0003:0000046D:0000C548", ATTRS{bInterfaceProtocol}=="00", TAG+="uaccess"
 
-# Logitech evdev mouse nodes used for button/gesture remapping.
-KERNEL=="event*", SUBSYSTEM=="input", ATTRS{idVendor}=="046d", TAG+="uaccess"
-KERNEL=="event*", SUBSYSTEM=="input", KERNELS=="0003:046D:*", TAG+="uaccess"
-KERNEL=="event*", SUBSYSTEM=="input", KERNELS=="0005:046D:*", TAG+="uaccess"
+# Directly connected mouse models supported by Mouser's device catalog.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B012", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B019", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B01A", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B020", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B023", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B025", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B028", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B02A", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B02D", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B034", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B037", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B042", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B043", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000B048", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000407F", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:00004099", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000409F", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C07D", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C08B", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C08D", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C095", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C098", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C099", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:0000C332", TAG+="uaccess"
+
+# Conservative fallback for uncatalogued Logitech devices explicitly exposed
+# by the kernel as mice; keyboard-only HID names do not receive an ACL.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ENV{HID_ID}=="*:0000046D:*", ENV{HID_NAME}=="*Mouse*", TAG+="uaccess"
+
+# Logitech evdev mouse nodes used for button/gesture remapping. ID_INPUT_MOUSE
+# keeps keyboard-only nodes out of the active desktop session's raw-event ACL.
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_KEYBOARD}!="1", ATTRS{idVendor}=="046d", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_KEYBOARD}!="1", KERNELS=="0003:046D:*", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_KEYBOARD}!="1", KERNELS=="0005:046D:*", TAG+="uaccess"
 
 # Virtual input device used to forward non-blocked mouse events.
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

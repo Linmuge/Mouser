@@ -57,6 +57,31 @@ ApplicationWindow {
         root.contentItem.forceActiveFocus(Qt.OtherFocusReason)
     }
 
+    function ensureCurrentPageAvailable() {
+        if (root.currentPage === 2 && !backend.hapticSupported) {
+            root.openPage(0)
+        } else if (root.currentPage === 3
+                   && !(backend.deviceHasActionsRing && backend.actionsRingActive)) {
+            root.openPage(0)
+        }
+    }
+
+    Connections {
+        target: backend
+
+        function onHapticSupportedChanged() {
+            root.ensureCurrentPageAvailable()
+        }
+
+        function onDeviceHasActionsRingChanged() {
+            root.ensureCurrentPageAvailable()
+        }
+
+        function onActionsRingActiveChanged() {
+            root.ensureCurrentPageAvailable()
+        }
+    }
+
     color: theme.bg
 
     Material.theme: darkMode ? Material.Dark : Material.Light

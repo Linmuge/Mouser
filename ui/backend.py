@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import urllib.error
+import uuid
 import webbrowser
 from pathlib import Path
 
@@ -71,6 +72,8 @@ from core.update_installer import (
     prepare_downloaded_asset,
     read_update_result,
     same_volume_windows_stage_dir,
+    verify_windows_authenticode,
+    verify_windows_content_catalog,
     write_windows_update_plan,
 )
 from core.version import APP_VERSION
@@ -262,8 +265,9 @@ class Backend(QObject):
     _statusMessageRequest = Signal(str)
     _updateAvailableRequest = Signal(str, str, bool, object)
     _updateCheckFinishedRequest = Signal(bool, bool, object)
-    _updateInstallStateRequest = Signal(str, str, bool)
-    _updateInstallProgressRequest = Signal(int)
+    _updateInstallStateRequest = Signal(int, str, str, bool)
+    _updateInstallProgressRequest = Signal(int, int)
+    _updatePreparationFinishedRequest = Signal(int)
     _showRingRequest = Signal(list, bool)
     _hideRingRequest = Signal()
     _superKeyHeldRequest = Signal(bool)
@@ -310,6 +314,11 @@ class Backend(QObject):
         self._update_install_can_install = False
         self._update_install_progress = 0
         self._update_cancel = threading.Event()
+        self._update_prepare_lock = threading.Lock()
+        self._update_prepare_generation = 0
+        self._update_prepare_active = False
+        self._update_prepare_worker = None
+        self._update_prepare_operation_id = ""
         self._pending_update_plan = None
         self._pending_update_plan_path = None
         self._pending_update_helper_dir = None
@@ -359,6 +368,8 @@ class Backend(QObject):
             self._handleUpdateInstallState, Qt.QueuedConnection)
         self._updateInstallProgressRequest.connect(
             self._handleUpdateInstallProgress, Qt.QueuedConnection)
+        self._updatePreparationFinishedRequest.connect(
+            self._handleUpdatePreparationFinished, Qt.QueuedConnection)
         self._showRingRequest.connect(
             self._handleShowRing, Qt.QueuedConnection)
         self._hideRingRequest.connect(
@@ -827,7 +838,7 @@ class Backend(QObject):
 
     @Property(bool, notify=settingsChanged)
     def startMinimized(self):
-        return bool(self._cfg.get("settings", {}).get("start_minimized", True))
+        return bool(self._cfg.get("settings", {}).get("start_minimized", False))
 
     @Property(bool, notify=settingsChanged)
     def startAtLogin(self):
@@ -1283,14 +1294,31 @@ class Backend(QObject):
             self._update_install_progress = 0
         self.updateInstallChanged.emit()
 
-    @Slot(str, str, bool)
-    def _handleUpdateInstallState(self, status, message, can_install):
+    @Slot(int, str, str, bool)
+    def _handleUpdateInstallState(self, generation, status, message, can_install):
+        if int(generation) != self._update_prepare_generation:
+            return
+        if self._update_cancel.is_set() and status != "cancelled":
+            return
         self._setUpdateInstallState(status, message, can_install)
 
-    @Slot(int)
-    def _handleUpdateInstallProgress(self, value):
+    @Slot(int, int)
+    def _handleUpdateInstallProgress(self, generation, value):
+        if (
+            int(generation) != self._update_prepare_generation
+            or self._update_cancel.is_set()
+        ):
+            return
         self._update_install_progress = max(0, min(100, int(value)))
         self.updateInstallChanged.emit()
+
+    @Slot(int)
+    def _handleUpdatePreparationFinished(self, generation):
+        with self._update_prepare_lock:
+            if int(generation) != self._update_prepare_generation:
+                return
+            self._update_prepare_active = False
+            self._update_prepare_worker = None
 
     def _trustedBuildNumber(self):
         try:
@@ -1313,18 +1341,43 @@ class Backend(QObject):
             return "file_error"
         return "error"
 
-    def _updateProgressCallback(self, expected_size):
+    def _updateProgressCallback(self, expected_size, generation, cancel_event):
         def _progress(downloaded):
-            if expected_size:
+            if (
+                expected_size
+                and not cancel_event.is_set()
+                and int(generation) == self._update_prepare_generation
+            ):
                 self._updateInstallProgressRequest.emit(
-                    int(min(100, max(0, downloaded * 100 / expected_size)))
+                    int(generation),
+                    int(min(100, max(0, downloaded * 100 / expected_size))),
                 )
 
         return _progress
 
-    def _raiseIfUpdateCancelled(self):
-        if self._update_cancel.is_set():
+    def _raiseIfUpdateCancelled(self, cancel_event=None, generation=None):
+        cancel_event = cancel_event or self._update_cancel
+        generation = (
+            self._update_prepare_generation if generation is None else int(generation)
+        )
+        if (
+            cancel_event.is_set()
+            or generation != self._update_prepare_generation
+        ):
             raise UpdateInstallError("cancelled", "Update cancelled.")
+
+    def _emitUpdateInstallState(
+        self,
+        generation,
+        cancel_event,
+        status,
+        message="",
+        can_install=False,
+    ):
+        self._raiseIfUpdateCancelled(cancel_event, generation)
+        self._updateInstallStateRequest.emit(
+            int(generation), str(status), str(message), bool(can_install)
+        )
 
     def _cleanupUpdatePreparation(self, stage_dir=None):
         try:
@@ -1375,31 +1428,42 @@ class Backend(QObject):
         except Exception:
             pass
 
-    def _runPrepareLatestUpdate(self):
+    def _runPrepareLatestUpdate(
+        self,
+        generation=None,
+        cancel_event=None,
+        operation_id=None,
+    ):
+        generation = (
+            self._update_prepare_generation if generation is None else int(generation)
+        )
+        cancel_event = cancel_event or self._update_cancel
+        operation_id = str(operation_id or uuid.uuid4().hex)
         stage_dir = None
         try:
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             version = self._latest_update_version
             if not version:
-                self._updateInstallStateRequest.emit(
-                    "error", "check_first", False
+                self._emitUpdateInstallState(
+                    generation, cancel_event, "error", "check_first", False
                 )
                 return
             tag = version if version.startswith("v") else f"v{version}"
-            self._raiseIfUpdateCancelled()
-            self._updateInstallStateRequest.emit("checking", "", False)
-            self._raiseIfUpdateCancelled()
+            self._emitUpdateInstallState(generation, cancel_event, "checking")
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             manifest = fetch_update_manifest_for_release(
                 tag,
                 repo=DEFAULT_RELEASE_REPO,
                 highest_trusted_build=self._trustedBuildNumber(),
             )
-            self._raiseIfUpdateCancelled()
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             runtime = locate_runtime()
-            self._raiseIfUpdateCancelled()
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             asset = manifest.assets.get(runtime.platform_key)
             if asset is None:
-                self._raiseIfUpdateCancelled()
-                self._updateInstallStateRequest.emit(
+                self._emitUpdateInstallState(
+                    generation,
+                    cancel_event,
                     "manual_fallback",
                     "no_asset",
                     False,
@@ -1407,47 +1471,62 @@ class Backend(QObject):
                 return
             if not runtime.platform_key.startswith("windows"):
                 plan_install_for_platform(manifest, runtime=runtime)
-                self._raiseIfUpdateCancelled()
                 platform_message = (
                     "macos" if runtime.platform_key.startswith("macos") else "linux"
                 )
-                self._updateInstallStateRequest.emit(
-                    "manual_fallback", platform_message, False
+                self._emitUpdateInstallState(
+                    generation,
+                    cancel_event,
+                    "manual_fallback",
+                    platform_message,
+                    False,
                 )
                 return
             if not self.updateInstallEnabled:
-                self._raiseIfUpdateCancelled()
-                self._updateInstallStateRequest.emit(
-                    "manual_fallback", "windows", False
+                self._emitUpdateInstallState(
+                    generation, cancel_event, "manual_fallback", "windows", False
                 )
                 return
             if not runtime.update_supported:
-                self._raiseIfUpdateCancelled()
-                self._updateInstallStateRequest.emit(
-                    "manual_fallback", "windows", False
+                self._emitUpdateInstallState(
+                    generation, cancel_event, "manual_fallback", "windows", False
                 )
                 return
 
-            self._updateInstallStateRequest.emit("downloading", "", False)
+            self._emitUpdateInstallState(generation, cancel_event, "downloading")
             archive_path = prepare_downloaded_asset(
                 asset,
-                download_dir=runtime.app_data_dir / "downloads" / tag,
-                cancel_event=self._update_cancel,
-                progress_callback=self._updateProgressCallback(asset.size),
+                download_dir=(
+                    runtime.app_data_dir / "downloads" / tag / operation_id
+                ),
+                cancel_event=cancel_event,
+                progress_callback=self._updateProgressCallback(
+                    asset.size, generation, cancel_event
+                ),
             )
-            self._raiseIfUpdateCancelled()
-            self._updateInstallStateRequest.emit("verifying", "", False)
-            stage_dir = same_volume_windows_stage_dir(runtime.install_root, tag)
+            self._emitUpdateInstallState(generation, cancel_event, "verifying")
+            stage_dir = same_volume_windows_stage_dir(
+                runtime.install_root,
+                tag,
+                operation_id=operation_id,
+            )
             staged = extract_validated_zip(
                 archive_path,
                 stage_dir,
                 requirements=ArchiveRequirements(require_windows_app=True),
             )
-            self._raiseIfUpdateCancelled()
+            self._raiseIfUpdateCancelled(cancel_event, generation)
+            verify_windows_authenticode(staged.app_root / "Mouser.exe")
+            verify_windows_content_catalog(staged.app_root)
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             plan = plan_install_for_platform(manifest, runtime=runtime, staged=staged)
             if not plan.can_install or not plan.staged:
-                self._updateInstallStateRequest.emit(
-                    plan.status, plan.message, plan.can_install
+                self._emitUpdateInstallState(
+                    generation,
+                    cancel_event,
+                    plan.status,
+                    plan.message,
+                    plan.can_install,
                 )
                 return
             backup_root = runtime.install_root.with_name(
@@ -1464,18 +1543,33 @@ class Backend(QObject):
                 target_version=manifest.version,
                 target_build_number=manifest.build_number,
             )
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             write_windows_update_plan(windows_plan, state_path)
+            self._raiseIfUpdateCancelled(cancel_event, generation)
             self._pending_update_plan = windows_plan
             self._pending_update_plan_path = state_path
-            self._pending_update_helper_dir = runtime.app_data_dir / "helper" / tag
-            self._updateInstallStateRequest.emit("ready_to_install", "", True)
+            self._pending_update_helper_dir = (
+                runtime.app_data_dir / "helper" / tag / operation_id
+            )
+            self._emitUpdateInstallState(
+                generation, cancel_event, "ready_to_install", "", True
+            )
         except Exception as exc:
             code = self._updateErrorCode(exc)
             self._cleanupUpdatePreparation(stage_dir)
             if code == "cancelled":
-                self._updateInstallStateRequest.emit("cancelled", "", False)
-                return
-            self._updateInstallStateRequest.emit("error", code, False)
+                self._updateInstallStateRequest.emit(
+                    generation, "cancelled", "", False
+                )
+            elif (
+                generation == self._update_prepare_generation
+                and not cancel_event.is_set()
+            ):
+                self._updateInstallStateRequest.emit(
+                    generation, "error", code, False
+                )
+        finally:
+            self._updatePreparationFinishedRequest.emit(generation)
 
     # ── Slots ──────────────────────────────────────────────────
 
@@ -1570,20 +1664,48 @@ class Backend(QObject):
         if self.updateInstallInProgress:
             self.statusMessage.emit("Update is already in progress")
             return
-        self._update_cancel.clear()
+        with self._update_prepare_lock:
+            if self._update_prepare_active:
+                self.statusMessage.emit(
+                    "The cancelled update is still stopping; try again shortly"
+                )
+                return
+            self._update_prepare_generation += 1
+            generation = self._update_prepare_generation
+            cancel_event = threading.Event()
+            operation_id = uuid.uuid4().hex
+            self._update_cancel = cancel_event
+            self._update_prepare_operation_id = operation_id
+            self._update_prepare_active = True
+            self._pending_update_plan = None
+            self._pending_update_plan_path = None
+            self._pending_update_helper_dir = None
         self._setUpdateInstallState("checking")
-        thread = threading.Thread(
-            target=self._runPrepareLatestUpdate,
-            name="MouserPrepareUpdate",
-            daemon=True,
-        )
-        thread.start()
+        try:
+            thread = threading.Thread(
+                target=lambda: self._runPrepareLatestUpdate(
+                    generation, cancel_event, operation_id
+                ),
+                name="MouserPrepareUpdate",
+                daemon=True,
+            )
+            with self._update_prepare_lock:
+                self._update_prepare_worker = thread
+            thread.start()
+        except Exception:
+            with self._update_prepare_lock:
+                if generation == self._update_prepare_generation:
+                    self._update_prepare_active = False
+                    self._update_prepare_worker = None
+            self._setUpdateInstallState("error", "thread_start_failed", False)
 
     @Slot()
     def cancelUpdatePreparation(self):
         if self._update_install_status not in {"checking", "downloading", "verifying"}:
             return
-        self._update_cancel.set()
+        with self._update_prepare_lock:
+            cancel_event = self._update_cancel
+        cancel_event.set()
         self._setUpdateInstallState("cancelled")
 
     @Slot()

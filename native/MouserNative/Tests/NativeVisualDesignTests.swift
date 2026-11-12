@@ -3,83 +3,240 @@ import Testing
 
 @Suite("Native macOS visual design")
 struct NativeVisualDesignTests {
-    @Test("shared design system creates a spatial native scene instead of a flat gray canvas")
-    func sharedDesignSystemCreatesSpatialNativeScene() throws {
-        let source = try source(named: "DesignSystem.swift")
-
-        #expect(source.contains("struct MouserBackground"))
-        #expect(source.contains("struct AmbientOrb"))
-        #expect(source.contains("LinearGradient"))
-        #expect(source.contains(".blendMode(.plusLighter)"))
-        #expect(!source.contains("RadialGradient"))
-    }
-
-    @Test("live device values use restrained native motion without toolbar decoration")
-    func liveDeviceValuesUseRestrainedNativeMotion() throws {
-        let workspace = try source(named: "PrecisionWorkspaceView.swift")
-        let overview = try source(named: "OverviewView.swift")
-        let sidebar = try source(named: "SidebarView.swift")
-
-        #expect(workspace.contains(".buttonStyle(.glass)"))
-        #expect(!workspace.contains(".contentTransition(.symbolEffect(.replace))"))
-        #expect(overview.contains(".contentTransition(.numericText())"))
-        #expect(sidebar.contains(".symbolEffect(.pulse"))
-    }
-
-    @Test("selected precision workspace replaces the split sidebar shell")
-    func selectedPrecisionWorkspaceReplacesSplitSidebarShell() throws {
+    @Test("FundBar dashboard shell replaces the sidebar and floating dock")
+    func dashboardShellReplacesSidebarAndDock() throws {
         let content = try source(named: "ContentView.swift")
+        let workspace = try source(named: "WorkspaceView.swift")
+
+        #expect(content.contains("MouserWorkspaceView(model: model)"))
+        #expect(!content.contains("NavigationSplitView"))
+        #expect(!content.contains("DetailedSettingsView"))
+        #expect(content.contains("WindowAppearanceBridge(mode: model.appearanceMode)"))
+
+        #expect(workspace.contains("OverviewView(model: model)"))
+        #expect(workspace.contains("SectionDetailOverlay"))
+        #expect(workspace.contains(".move(edge: .trailing).combined(with: .opacity)"))
+        #expect(!workspace.contains("WorkspaceSidebar"))
+        #expect(!workspace.contains("PrecisionDock"))
+        #expect(!workspace.contains("PrecisionStageRouter"))
+        #expect(!workspace.contains("showsDetailedSettings"))
+    }
+
+    @Test("window chrome keeps bootstrap-driven visibility and the hidden title bar")
+    func windowChromeKeepsBootstrapVisibility() throws {
         let app = try source(named: "MouserNativeApp.swift")
 
-        #expect(content.contains("PrecisionWorkspaceView(model: model)"))
-        #expect(!content.contains("NavigationSplitView"))
-        #expect(!content.contains("SidebarView"))
         #expect(app.contains(".windowStyle(.hiddenTitleBar)"))
-        #expect(workspaceChromeExtendsBehindNativeControls())
+        #expect(app.contains("model.shouldStartMinimizedAfterBootstrap"))
+        #expect(app.contains("model.shouldPresentSettingsAfterBootstrap"))
+        #expect(!app.contains("if model.startMinimized"))
     }
 
-    private func workspaceChromeExtendsBehindNativeControls() -> Bool {
-        guard let workspace = try? source(named: "PrecisionWorkspaceView.swift") else {
-            return false
-        }
-        return workspace.contains(".ignoresSafeArea(.container, edges: .top)")
+    @Test("only the window surface bleeds into the top safe area")
+    func onlyWindowSurfaceBleedsIntoSafeArea() throws {
+        let workspace = try source(named: "WorkspaceView.swift")
+
+        // Only the window surface may bleed into the top safe area. Extending
+        // the whole workspace instead breaks hit-testing in fullscreen windows,
+        // which used to leave the button-stage hotspots unclickable.
+        #expect(workspace.contains("private struct WorkspaceWindowSurface"))
+        #expect(workspace.contains(".ignoresSafeArea()"))
+        #expect(!workspace.contains(".ignoresSafeArea(.container, edges: .top)"))
     }
 
-    @Test("precision workspace keeps every settings destination in the new stage and inspector")
-    func precisionWorkspaceKeepsEverySettingsDestination() throws {
-        let workspace = try source(named: "PrecisionWorkspaceView.swift")
-        let stages = try source(named: "PrecisionWorkspaceStages.swift")
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
+    @Test("dashboard composes hero, function panels, and status rail")
+    func dashboardComposesHeroPanelsAndRail() throws {
+        let overview = try source(named: "OverviewView.swift")
 
-        for section in [
-            "overview", "buttons", "pointerAndScroll", "haptics",
-            "actionsRing", "profiles", "advanced",
+        for component in [
+            "private struct DeviceHeroPanel",
+            "struct DPIRangeBar",
+            "ButtonMappingPanel(model: model)",
+            "struct DashboardPanel",
+            "private struct WheelPointerCard",
+            "private struct HapticsCard",
+            "private struct DeviceStatusPanel",
+            "private struct ActionsRingPanel",
+            "private struct QuickSettingsPanel",
+            "private struct AccessibilityBanner",
         ] {
-            #expect(workspace.contains("case .\(section):"))
+            #expect(overview.contains(component))
         }
 
-        #expect(stages.contains("MouseButtonStageLayout.layout"))
-        #expect(stages.contains("MouseImage(resourceName:"))
-        #expect(inspectors.contains("ActionPicker("))
-        #expect(inspectors.contains("$model.dpi"))
-        #expect(inspectors.contains("$model.invertVerticalScroll"))
-        #expect(inspectors.contains("$model.hapticsEnabled"))
-        #expect(inspectors.contains("model.setActionsRingSlot"))
-        #expect(inspectors.contains("model.setStartAtLogin"))
+        #expect(overview.contains("model.requestAccessibility()"))
+        #expect(overview.contains("model.configurationPersistenceState.message"))
+        #expect(overview.contains("case .failed: .red"))
+        #expect(overview.contains("model.setStartAtLogin"))
+        #expect(overview.contains("GlassEffectContainer"))
+        #expect(overview.contains(".onContinuousHover"))
+        #expect(overview.contains(".rotation3DEffect"))
+        #expect(overview.contains(".contentTransition(.numericText())"))
+        #expect(overview.contains("size: 44, weight: .semibold"))
+        #expect(
+            overview.contains(
+                "let resolvedResourceName = resourceName ?? \"mx-master-3s\""
+            )
+        )
     }
 
-    @Test("approved B geometry is implemented at full and compact window sizes")
-    func approvedBGeometryIsImplementedAtBothWindowSizes() throws {
-        let workspace = try source(named: "PrecisionWorkspaceView.swift")
+    @Test("toolbar exposes device, profile, permission, appearance, and maintenance")
+    func toolbarExposesDeviceAndMaintenanceActions() throws {
+        let workspace = try source(named: "WorkspaceView.swift")
 
-        #expect(workspace.contains("enum PrecisionWorkspaceMetrics"))
-        #expect(workspace.contains("width <= 1_120"))
-        #expect(workspace.contains("chromeHeight: 58"))
-        #expect(workspace.contains("inspectorWidth: compact ? 284 : 314"))
-        #expect(workspace.contains("inspectorTrailing: compact ? 18 : 28"))
-        #expect(workspace.contains("dockWidth: compact ? 600 : 650"))
-        #expect(workspace.contains("showsProfilePill: !compact"))
-        #expect(workspace.contains("showsPermissionButton: !compact"))
+        #expect(workspace.contains("当前配置"))
+        #expect(workspace.contains("管理配置"))
+        #expect(workspace.contains("权限正常"))
+        #expect(workspace.contains("需要权限"))
+        #expect(workspace.contains("model.requestAccessibility()"))
+        #expect(workspace.contains(".buttonStyle(.glass)"))
+        #expect(workspace.contains("检查更新"))
+        #expect(workspace.contains("model.exportDiagnostics()"))
+        #expect(workspace.contains("关于 Mouser"))
+        #expect(workspace.contains(".buttonStyle(.glass)"))
+        // 顶栏五个控件共用同一枚交互式玻璃胶囊底座。
+        #expect(workspace.contains("private struct ToolbarGlassCapsule"))
+        #expect(workspace.contains(".glassEffect(.regular.interactive(), in: Capsule())"))
+
+        let toolbarStart = try #require(workspace.range(of: "private struct DeviceMenu"))
+        let moreEnd = try #require(workspace.range(of: "更多操作"))
+        let toolbarControls = workspace[toolbarStart.lowerBound..<moreEnd.upperBound]
+        #expect(!toolbarControls.contains(".buttonStyle(.glass)"))
+    }
+
+    @Test("slide-in overlay routes every section destination")
+    func overlayRoutesEverySectionDestination() throws {
+        let workspace = try source(named: "WorkspaceView.swift")
+
+        for destination in [
+            "ButtonsDetailContent(model: model)",
+            "PointerScrollView(model: model)",
+            "HapticsView(model: model)",
+            "ActionsRingSettingsView(model: model)",
+            "ProfilesView(model: model)",
+            "AdvancedView(model: model)",
+        ] {
+            #expect(workspace.contains(destination))
+        }
+        #expect(workspace.contains("model.selectedSection = .overview"))
+    }
+
+    @Test("palette pairs Apple-blue chrome with an ambient liquid-glass canvas")
+    func paletteUsesQuietNativeTokens() throws {
+        let design = try source(named: "DesignSystem.swift")
+
+        for token in [
+            "red: 0, green: 113, blue: 227",
+            "red: 10, green: 132, blue: 255",
+            "red: 10, green: 159, blue: 146",
+            "red: 233, green: 234, blue: 238",
+        ] {
+            #expect(design.contains(token))
+        }
+
+        // Liquid Glass is the surface system: ambient orbs refract through
+        // real glassEffect cards instead of flat solid panels.
+        #expect(design.contains("struct MouserBackground"))
+        #expect(design.contains("struct AmbientOrb"))
+        #expect(design.contains("RadialGradient"))
+        #expect(design.contains(".glassEffect("))
+    }
+
+    @Test("cards follow the liquid-glass surface recipe")
+    func cardsFollowHairlineSurfaceRecipe() throws {
+        let design = try source(named: "DesignSystem.swift")
+        let settings = try source(named: "SettingsViews.swift")
+
+        #expect(design.contains("struct MouserGlassCard"))
+        #expect(design.contains(".glassEffect("))
+        #expect(design.contains("struct MouserHairline"))
+        #expect(design.contains("func mouserCard("))
+        #expect(design.contains("func mouserHoverLift"))
+
+        #expect(settings.contains("MouserHairline()"))
+        #expect(!settings.contains("PrecisionRule"))
+        #expect(!settings.contains("showsTopBorder"))
+        #expect(!settings.contains("showsFooterRule"))
+    }
+
+    @Test("button mapping keeps artwork hotspots on the dashboard")
+    func buttonMappingKeepsArtworkHotspots() throws {
+        let buttons = try source(named: "ButtonsView.swift")
+
+        for component in [
+            "struct ButtonMappingPanel",
+            "struct ButtonsDetailContent",
+            "MouseButtonStageLayout.layout",
+            "MouseImage(resourceName:",
+            "ShortcutCaptureSheet",
+        ] {
+            #expect(buttons.contains(component))
+        }
+
+        #expect(buttons.contains("matchedGeometryEffect"))
+        #expect(buttons.contains(".onHover"))
+        #expect(buttons.contains("glassEffect"))
+        #expect(buttons.contains("hscroll_left"))
+        #expect(buttons.contains("hscroll_right"))
+        #expect(buttons.contains("GestureMappingEditor"))
+    }
+
+    @Test("actions ring diagram stays interactive and synced with slot rows")
+    func actionsRingDiagramStaysInteractive() throws {
+        let settings = try source(named: "SettingsViews.swift")
+
+        #expect(settings.contains("private struct ActionsRingDiagram"))
+        #expect(settings.contains("AngularGradient("))
+        #expect(settings.contains("model.selectedActionsRingIndex = index"))
+        #expect(settings.contains("model.setActionsRingSlot"))
+    }
+
+    @Test("settings pages keep every control bound to real model state")
+    func settingsPagesKeepRealBindings() throws {
+        let settings = try source(named: "SettingsViews.swift")
+
+        for binding in [
+            "$model.dpi",
+            "$model.invertVerticalScroll",
+            "$model.invertHorizontalScroll",
+            "$model.hapticsEnabled",
+            "model.setStartAtLogin",
+            "model.updateStatusText",
+            "model.downloadAndInstallLatestUpdate()",
+            "model.setActionsRingSlot",
+            "model.setDPIPreset",
+        ] {
+            #expect(settings.contains(binding))
+        }
+
+        #expect(!settings.contains("Text(\"已自动保存\")"))
+        #expect(!settings.contains("@State private var longPressEnabled"))
+        #expect(!settings.contains("@State private var automaticallySwitches"))
+        #expect(!settings.contains("@State private var restoresAfterWake"))
+    }
+
+    @Test("motion is lively but always gated by Reduce Motion")
+    func motionStaysBriefAndAccessible() throws {
+        let design = try source(named: "DesignSystem.swift")
+
+        #expect(design.contains("struct MouserRevealModifier"))
+        #expect(design.contains("@Environment(\\.accessibilityReduceMotion)"))
+        #expect(design.contains(".opacity("))
+        #expect(design.contains(".offset("))
+        // The ambient orbs drift forever, so Reduce Motion must pin them still.
+        #expect(design.contains("guard !reduceMotion, !drifting else { return }"))
+        #expect(design.contains("repeatForever(autoreverses: true)"))
+    }
+
+    @Test("window appearance keeps native materials in the selected color scheme")
+    func windowAppearanceKeepsNativeMaterials() throws {
+        let design = try source(named: "DesignSystem.swift")
+        let content = try source(named: "ContentView.swift")
+
+        #expect(design.contains("struct WindowAppearanceBridge"))
+        #expect(design.contains("window?.appearance"))
+        #expect(design.contains("standardWindowButton(.closeButton)"))
+        #expect(design.contains("styleMask.insert(.fullSizeContentView)"))
+        #expect(!content.contains(".preferredColorScheme"))
     }
 
     @Test("isolated visual QA uses the approved full-size viewport")
@@ -89,215 +246,17 @@ struct NativeVisualDesignTests {
         #expect(app.contains("previewMode == \"MouserUIPreview\""))
         #expect(app.contains("NSSize(width: 1_320, height: 820)"))
         #expect(app.contains("window.setFrame"))
+        #expect(app.contains(".frame(minWidth: 1_052, minHeight: 620)"))
+        #expect(app.contains(".defaultSize(width: 1_320, height: 788)"))
     }
 
-    @Test("compact visual QA matches the 1052 by 652 window inside the approved canvas")
+    @Test("compact visual QA matches the 1052 by 652 window on the button screen")
     func compactVisualQAMatchesApprovedButtonScreen() throws {
         let app = try source(named: "MouserNativeApp.swift")
-        let stages = try source(named: "PrecisionWorkspaceStages.swift")
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
 
         #expect(app.contains("MouserUIPreviewCompact"))
         #expect(app.contains("NSSize(width: 1_052, height: 652)"))
-        #expect(app.contains(".frame(minWidth: 1_052, minHeight: 620)"))
-        #expect(app.contains(".defaultSize(width: 1_320, height: 788)"))
         #expect(app.contains("model.selectedSection = .buttons"))
-        #expect(inspectors.contains(".frame(width: 42, height: 24)"))
-        #expect(inspectors.contains(".offset(x: isOn ? 9 : -9)"))
-        #expect(stages.contains("metrics.mouseImageFrame("))
-        #expect(stages.contains("in: imageFrame"))
-        #expect(stages.contains("rotationDegrees: 1"))
-        #expect(stages.contains(".offset(x: proxy.size.width * 0.50"))
-        #expect(inspectors.contains("ScrollView(.vertical, showsIndicators: false)"))
-        #expect(inspectors.contains("struct PrecisionActionFieldVisualLabel"))
-        #expect(inspectors.contains(".opacity(0.001)"))
-        #expect(inspectors.contains("Image(systemName: \"chevron.down\")"))
-    }
-
-    @Test("button inspector uses spacing instead of decorative separator rules")
-    func buttonInspectorRemovesDecorativeRules() throws {
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
-        let start = try #require(inspectors.range(of: "struct PrecisionButtonsInspector"))
-        let end = try #require(inspectors.range(of: "struct PrecisionPointerInspector"))
-        let buttonInspector = inspectors[start.lowerBound..<end.lowerBound]
-
-        #expect(!buttonInspector.contains("PrecisionRule()"))
-        #expect(!buttonInspector.contains("showsTopBorder"))
-        #expect(!buttonInspector.contains("showsFooterRule"))
-    }
-
-    @Test("every inspector removes decorative rules and the save footer stays transparent")
-    func everyInspectorRemovesDecorativeRules() throws {
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
-        let panelStart = try #require(inspectors.range(of: "private struct PrecisionInspectorPanel"))
-        let panelEnd = try #require(inspectors.range(of: "private struct PrecisionSectionGap"))
-        let inspectorPanel = inspectors[panelStart.lowerBound..<panelEnd.lowerBound]
-
-        #expect(!inspectors.contains("PrecisionRule"))
-        #expect(!inspectors.contains("showsTopBorder"))
-        #expect(!inspectors.contains("showsFooterRule"))
-        #expect(inspectors.contains("PrecisionSectionGap()"))
-        #expect(!inspectorPanel.contains(".background(panelColor)\n"))
-        #expect(
-            inspectorPanel.contains(
-                "VStack(alignment: .leading, spacing: 0) {\n            ScrollView"
-            )
-        )
-    }
-
-    @Test("range sliders keep quantized values without rendering discrete tick marks")
-    func rangeSlidersHideStepTickMarks() throws {
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
-
-        #expect(!inspectors.contains("Slider(value: $value, in: range, step: step)"))
-        #expect(inspectors.contains("PrecisionRangeQuantizer.quantize"))
-        #expect(inspectors.contains("Slider(value: quantizedValue, in: range)"))
-    }
-
-    @Test("every approved B stage is represented instead of a generic mouse scene")
-    func everyApprovedBStageIsRepresented() throws {
-        let stages = try source(named: "PrecisionWorkspaceStages.swift")
-
-        for component in [
-            "PrecisionOverviewQuickLines",
-            "PrecisionMetricStrip",
-            "PrecisionStageAxis",
-            "PrecisionHapticPulseRings",
-            "PrecisionEightDirectionRing",
-            "PrecisionProfileStageList",
-            "PrecisionDiagnosticStagePath",
-        ] {
-            #expect(stages.contains("struct \(component)"))
-        }
-        #expect(stages.contains("height: metrics.mouseHeight"))
-        #expect(stages.contains("x: size.width * metrics.mouseX"))
-        #expect(stages.contains("AngularGradient("))
-        #expect(stages.contains("Mission Control"))
-        #expect(stages.contains("媒体播放"))
-        #expect(stages.contains("截图"))
-    }
-
-    @Test("inspectors preserve all controls visible in the approved B screens")
-    func inspectorsPreserveApprovedBControls() throws {
-        let inspectors = try source(named: "PrecisionWorkspaceInspectors.swift")
-
-        for copy in [
-            "恢复状态", "长按动作", "关闭 SmartShift 后", "测试反馈",
-            "作用范围", "适用应用", "自动切换", "继承指针设置",
-            "唤醒后恢复", "重连后恢复", "诊断日志",
-        ] {
-            #expect(inspectors.contains("\"\(copy)\""))
-        }
-    }
-
-    @Test("receiver placeholders retain the default mouse product artwork")
-    func receiverPlaceholderRetainsDefaultMouseArtwork() throws {
-        let overview = try source(named: "OverviewView.swift")
-
-        #expect(
-            overview.contains(
-                "let resolvedResourceName = resourceName ?? \"mx-master-3s\""
-            )
-        )
-    }
-
-    @Test("overview centers the product in an asymmetric device stage")
-    func overviewUsesAsymmetricDeviceStage() throws {
-        let overview = try source(named: "OverviewView.swift")
-
-        #expect(overview.contains("private struct DeviceHeroStage"))
-        #expect(overview.contains("private struct DeviceTelemetryRail"))
-        #expect(overview.contains("private struct QuickControlDock"))
-        #expect(overview.contains(".frame(maxWidth: 520, maxHeight: 360)"))
-        #expect(!overview.contains("DeviceSummaryCard"))
-        #expect(!overview.contains("MetricTile"))
-        #expect(!overview.contains("RadialGradient"))
-    }
-
-    @Test("button mapping uses a focused studio instead of two unrelated gray cards")
-    func buttonMappingUsesFocusedStudio() throws {
-        let buttons = try source(named: "ButtonsView.swift")
-
-        #expect(buttons.contains("private struct ButtonMappingStudio"))
-        #expect(buttons.contains("private struct MouseButtonStageBackdrop"))
-        #expect(buttons.contains("private struct MappingInspector"))
-        #expect(buttons.contains(".offset(x: -18)"))
-    }
-
-    @Test("motion is brief, transform based, and respects Reduce Motion")
-    func motionIsBriefTransformBasedAndAccessible() throws {
-        let design = try source(named: "DesignSystem.swift")
-
-        #expect(design.contains("struct MouserRevealModifier"))
-        #expect(design.contains("@Environment(\\.accessibilityReduceMotion)"))
-        #expect(design.contains(".opacity("))
-        #expect(design.contains(".offset("))
-        #expect(design.contains(".scaleEffect("))
-        #expect(!design.contains("repeatForever"))
-    }
-
-    @Test("device artwork and button selection respond directly to pointer actions")
-    func deviceArtworkAndButtonSelectionRespondToPointer() throws {
-        let overview = try source(named: "OverviewView.swift")
-        let buttons = try source(named: "ButtonsView.swift")
-
-        #expect(overview.contains(".onContinuousHover"))
-        #expect(overview.contains(".rotation3DEffect"))
-        #expect(buttons.contains("matchedGeometryEffect"))
-        #expect(buttons.contains(".onHover"))
-    }
-
-    @Test("window appearance keeps native materials in the selected color scheme")
-    func windowAppearanceKeepsNativeMaterialsInSync() throws {
-        let design = try source(named: "DesignSystem.swift")
-        let content = try source(named: "ContentView.swift")
-
-        #expect(design.contains("struct WindowAppearanceBridge"))
-        #expect(design.contains("window?.appearance"))
-        #expect(
-            content.contains(
-                "WindowAppearanceBridge(mode: model.appearanceMode)"
-            )
-        )
-        #expect(design.contains("standardWindowButton(.closeButton)"))
-        #expect(design.contains("styleMask.insert(.fullSizeContentView)"))
-        #expect(!content.contains(".preferredColorScheme"))
-    }
-
-    @Test("title bar and workspace share one continuous window surface")
-    func titleBarAndWorkspaceShareOneContinuousSurface() throws {
-        let workspace = try source(named: "PrecisionWorkspaceView.swift")
-        let titleBarStart = try #require(
-            workspace.range(of: "private struct PrecisionTitleBar")
-        )
-        let titleBarEnd = try #require(
-            workspace.range(of: "private struct PrecisionDeviceMenu")
-        )
-        let titleBar = String(workspace[titleBarStart.lowerBound..<titleBarEnd.lowerBound])
-
-        #expect(workspace.contains("PrecisionWindowSurface()"))
-        #expect(!titleBar.contains("LinearGradient("))
-        #expect(!titleBar.contains(".background(.ultraThinMaterial)"))
-        #expect(!titleBar.contains("@Environment(\\.colorScheme)"))
-        #expect(!titleBar.contains("private var surface"))
-    }
-
-    @Test("precision palette uses the approved B light and dark tokens")
-    func precisionPaletteUsesApprovedBTokens() throws {
-        let design = try source(named: "DesignSystem.swift")
-
-        for token in [
-            "10, green: 159, blue: 146",
-            "50, green: 214, blue: 194",
-            "49, green: 184, blue: 117",
-            "72, green: 217, blue: 144",
-            "112, green: 121, blue: 124",
-            "155, green: 166, blue: 164",
-        ] {
-            #expect(design.contains(token))
-        }
-        #expect(design.contains("static let muted"))
-        #expect(design.contains("static let ink"))
     }
 
     private func source(named fileName: String) throws -> String {

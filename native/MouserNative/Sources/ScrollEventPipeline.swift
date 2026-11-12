@@ -202,6 +202,14 @@ struct SessionRecoveryPlanner: Sendable {
         return Self.retryDelays
     }
 
+    static func interAttemptWaits(for offsets: [Duration]) -> [Duration] {
+        var previousOffset = Duration.zero
+        return offsets.map { offset in
+            defer { previousOffset = offset }
+            return max(.zero, offset - previousOffset)
+        }
+    }
+
     mutating func markHIDSettingsRestored() {
         awaitsHIDSettingsRestore = false
     }

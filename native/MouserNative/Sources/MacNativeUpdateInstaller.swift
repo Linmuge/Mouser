@@ -2,6 +2,57 @@ import AppKit
 import CryptoKit
 import Darwin
 import Foundation
+import Security
+
+enum MouserApplicationCodeIdentity {
+    static let bundleIdentifier = "io.github.tombadash.mouser"
+    static let teamIdentifier = "99M5SZBF38"
+    static let requirementText = """
+    identifier "\(bundleIdentifier)" and anchor apple generic and \
+    certificate 1[field.1.2.840.113635.100.6.2.6] exists and \
+    certificate leaf[field.1.2.840.113635.100.6.1.13] exists and \
+    certificate leaf[subject.OU] = "\(teamIdentifier)"
+    """
+
+    static func validate(_ applicationURL: URL) throws {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(
+            applicationURL as CFURL,
+            [],
+            &staticCode
+        )
+        guard createStatus == errSecSuccess, let staticCode else {
+            throw invalidApplication(status: createStatus)
+        }
+
+        var requirement: SecRequirement?
+        let requirementStatus = SecRequirementCreateWithString(
+            requirementText as CFString,
+            [],
+            &requirement
+        )
+        guard requirementStatus == errSecSuccess, let requirement else {
+            throw invalidApplication(status: requirementStatus)
+        }
+
+        let validityStatus = SecStaticCodeCheckValidity(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
+            requirement
+        )
+        guard validityStatus == errSecSuccess else {
+            throw invalidApplication(status: validityStatus)
+        }
+    }
+
+    private static func invalidApplication(status: OSStatus) -> UpdateInstallError {
+        let detail = SecCopyErrorMessageString(status, nil) as String?
+        return .invalidApplication(
+            detail.map { "更新包签名身份不匹配：\($0)" }
+                ?? "更新包签名身份不匹配（\(status)）"
+        )
+    }
+}
 
 struct NativeUpdateInstallPlan: Codable, Equatable, Sendable {
     var parentProcessID: Int32
@@ -25,12 +76,18 @@ struct NativeUpdateInstallPlan: Codable, Equatable, Sendable {
               stagingDirectory.lastPathComponent.hasPrefix(".\(install.lastPathComponent).update-"),
               backup.deletingLastPathComponent() == parent,
               backup.lastPathComponent.hasPrefix(".\(install.deletingPathExtension().lastPathComponent).backup-"),
-              !expectedBundleIdentifier.isEmpty,
+              install.lastPathComponent == "Mouser.app",
+              expectedBundleIdentifier == MouserApplicationCodeIdentity.bundleIdentifier,
               !expectedVersion.isEmpty
         else {
             throw UpdateInstallError.unsafeInstallPlan
         }
     }
+}
+
+enum NativeUpdateInstallResult: Codable, Equatable, Sendable {
+    case succeeded(NativeUpdateInstallPlan)
+    case failed(String)
 }
 
 struct DiskImageAttachment: Equatable, Sendable {
@@ -79,7 +136,7 @@ protocol NativeUpdatePreparing: Sendable {
 }
 
 actor MacNativeUpdateInstaller: NativeUpdatePreparing {
-    private let expectedBundleIdentifier = "io.github.tombadash.mouser"
+    private let expectedBundleIdentifier = MouserApplicationCodeIdentity.bundleIdentifier
 
     func prepare(
         release: MouserRelease,
@@ -242,6 +299,7 @@ actor MacNativeUpdateInstaller: NativeUpdatePreparing {
         guard version == expectedVersion else {
             throw UpdateInstallError.invalidApplication("更新包版本与 Release 不一致")
         }
+        try MouserApplicationCodeIdentity.validate(url)
     }
 
     @discardableResult
@@ -302,35 +360,102 @@ enum MacUpdateInstallHelper {
         guard let index = arguments.firstIndex(of: argument),
               arguments.indices.contains(index + 1)
         else { return false }
+        let planURL = URL(filePath: arguments[index + 1], directoryHint: .notDirectory)
+        var requestedPlan: NativeUpdateInstallPlan?
         do {
-            let planURL = URL(filePath: arguments[index + 1], directoryHint: .notDirectory)
             let plan = try JSONDecoder().decode(
                 NativeUpdateInstallPlan.self,
                 from: Data(contentsOf: planURL)
             )
+            requestedPlan = plan
             try install(plan)
-            try JSONEncoder().encode(plan).write(to: resultURL, options: .atomic)
+            try writeResult(.succeeded(plan), to: resultURL)
             try? FileManager.default.removeItem(at: planURL)
             return true
         } catch {
-            let message = Data(error.localizedDescription.utf8)
-            try? message.write(to: resultURL, options: .atomic)
+            finishFailedInstall(
+                message: error.localizedDescription,
+                plan: requestedPlan,
+                resultURL: resultURL
+            )
+            try? FileManager.default.removeItem(at: planURL)
             return true
         }
     }
 
-    static func cleanupCompletedInstall() {
+    @discardableResult
+    static func cleanupCompletedInstall(
+        at resultURL: URL = resultURL
+    ) -> NativeUpdateInstallResult? {
         guard let data = try? Data(contentsOf: resultURL),
-              let plan = try? JSONDecoder().decode(NativeUpdateInstallPlan.self, from: data),
+              let result = decodeResult(data)
+        else { return nil }
+        guard case let .succeeded(plan) = result else {
+            try? FileManager.default.removeItem(at: resultURL)
+            return result
+        }
+        guard (try? plan.validatePaths()) != nil,
               let bundle = Bundle(url: URL(filePath: plan.installAppPath)),
               bundle.bundleIdentifier == plan.expectedBundleIdentifier,
               bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == plan.expectedVersion
-        else { return }
+        else { return nil }
         try? FileManager.default.removeItem(at: URL(filePath: plan.backupAppPath))
         try? FileManager.default.removeItem(
             at: URL(filePath: plan.stagedAppPath).deletingLastPathComponent()
         )
         try? FileManager.default.removeItem(at: resultURL)
+        return result
+    }
+
+    static func finishFailedInstall(
+        message: String,
+        plan: NativeUpdateInstallPlan?,
+        resultURL: URL,
+        reopen: ((URL) -> Void)? = nil
+    ) {
+        try? writeResult(.failed(message), to: resultURL)
+        guard let plan, (try? plan.validatePaths()) != nil else { return }
+        let installURL = URL(filePath: plan.installAppPath, directoryHint: .isDirectory)
+        guard FileManager.default.fileExists(
+            atPath: installURL.path(percentEncoded: false)
+        ) else { return }
+        if let reopen {
+            reopen(installURL)
+        } else {
+            reopenApplication(at: installURL)
+        }
+    }
+
+    private static func writeResult(
+        _ result: NativeUpdateInstallResult,
+        to resultURL: URL
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: resultURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try JSONEncoder().encode(result).write(to: resultURL, options: .atomic)
+    }
+
+    private static func decodeResult(_ data: Data) -> NativeUpdateInstallResult? {
+        if let result = try? JSONDecoder().decode(NativeUpdateInstallResult.self, from: data) {
+            return result
+        }
+        if let legacyPlan = try? JSONDecoder().decode(NativeUpdateInstallPlan.self, from: data) {
+            return .succeeded(legacyPlan)
+        }
+        guard let legacyMessage = String(data: data, encoding: .utf8),
+              !legacyMessage.isEmpty
+        else { return nil }
+        return .failed(legacyMessage)
+    }
+
+    private static func reopenApplication(at applicationURL: URL) {
+        let open = Process()
+        open.executableURL = URL(filePath: "/usr/bin/open")
+        open.arguments = ["-n", applicationURL.path(percentEncoded: false)]
+        try? open.run()
     }
 
     private static func install(_ plan: NativeUpdateInstallPlan) throws {
@@ -347,15 +472,21 @@ enum MacUpdateInstallHelper {
         let installURL = URL(filePath: plan.installAppPath, directoryHint: .isDirectory)
         let stagedURL = URL(filePath: plan.stagedAppPath, directoryHint: .isDirectory)
         let backupURL = URL(filePath: plan.backupAppPath, directoryHint: .isDirectory)
-        guard Bundle(url: stagedURL)?.bundleIdentifier == plan.expectedBundleIdentifier else {
+        guard let stagedBundle = Bundle(url: stagedURL),
+              stagedBundle.bundleIdentifier == plan.expectedBundleIdentifier,
+              stagedBundle.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+              ) as? String == plan.expectedVersion
+        else {
             throw UpdateInstallError.invalidApplication("暂存应用身份不匹配")
         }
+        try MouserApplicationCodeIdentity.validate(stagedURL)
         try manager.moveItem(at: installURL, to: backupURL)
         do {
             try manager.moveItem(at: stagedURL, to: installURL)
             let open = Process()
             open.executableURL = URL(filePath: "/usr/bin/open")
-            open.arguments = [installURL.path(percentEncoded: false)]
+            open.arguments = ["-n", installURL.path(percentEncoded: false)]
             try open.run()
             open.waitUntilExit()
             guard open.terminationStatus == 0 else {
@@ -364,12 +495,6 @@ enum MacUpdateInstallHelper {
         } catch {
             try? manager.removeItem(at: installURL)
             try? manager.moveItem(at: backupURL, to: installURL)
-            if manager.fileExists(atPath: installURL.path(percentEncoded: false)) {
-                let open = Process()
-                open.executableURL = URL(filePath: "/usr/bin/open")
-                open.arguments = [installURL.path(percentEncoded: false)]
-                try? open.run()
-            }
             throw error
         }
     }

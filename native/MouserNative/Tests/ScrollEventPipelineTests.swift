@@ -230,6 +230,10 @@ struct SessionRecoveryPlannerTests {
         let delays = planner.schedule(for: .wake, uptime: .seconds(10))
 
         #expect(delays == [.zero, .seconds(1), .seconds(3)])
+        #expect(
+            SessionRecoveryPlanner.interAttemptWaits(for: delays) ==
+                [.zero, .seconds(1), .seconds(2)]
+        )
     }
 
     @Test("duplicate wake sources coalesce into one recovery sequence")

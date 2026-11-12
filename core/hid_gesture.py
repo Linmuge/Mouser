@@ -13,6 +13,7 @@ Falls back gracefully if the package or device are unavailable.
 
 import atexit
 import functools
+import math
 import os
 import stat
 import sys
@@ -111,14 +112,45 @@ def _load_last_device_cache() -> dict | None:
         return None
     if not isinstance(payload, dict):
         return None
-    if int(payload.get("version", 0)) != _CACHE_SCHEMA_VERSION:
+    try:
+        version = int(payload.get("version", 0))
+        saved_at = float(payload.get("saved_at", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
         return None
-    saved_at = float(payload.get("saved_at", 0) or 0)
-    if saved_at and (time.time() - saved_at) > _CACHE_TTL_SECONDS:
+    if version != _CACHE_SCHEMA_VERSION:
+        return None
+    now = time.time()
+    if (
+        not math.isfinite(saved_at)
+        or saved_at <= 0
+        or saved_at > now + 24 * 60 * 60
+    ):
+        return None
+    if (now - saved_at) > _CACHE_TTL_SECONDS:
         return None
     candidate = payload.get("candidate")
     device = payload.get("device")
     if not isinstance(candidate, dict) or not isinstance(device, dict):
+        return None
+    try:
+        numeric_fields = (
+            (candidate, "pid", 0xFFFF),
+            (candidate, "usage_page", 0xFFFF),
+            (candidate, "usage", 0xFFFF),
+            (device, "dev_idx", 0xFF),
+            (device, "feat_idx_reprog", 0xFF),
+        )
+        for container, key, maximum in numeric_fields:
+            value = int(container[key])
+            if value < 0 or value > maximum:
+                return None
+        for container, keys in (
+            (candidate, ("transport", "source", "path")),
+            (device, ("name", "transport")),
+        ):
+            if any(not isinstance(container.get(key, ""), str) for key in keys):
+                return None
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
     return payload
 

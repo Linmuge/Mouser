@@ -1,5 +1,6 @@
 import contextlib
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -9,6 +10,77 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from core import hid_gesture
+
+
+class HidLastDeviceCacheTests(unittest.TestCase):
+    def test_malformed_cache_fields_are_cache_misses_and_never_raise(self):
+        valid = {
+            "version": hid_gesture._CACHE_SCHEMA_VERSION,
+            "saved_at": time.time(),
+            "candidate": {
+                "pid": 0xB034,
+                "usage_page": 0xFF00,
+                "usage": 1,
+                "transport": "Bluetooth Low Energy",
+                "source": "hidapi-enumerate",
+                "path": "/dev/hidraw0",
+            },
+            "device": {
+                "name": "MX Master 3S",
+                "dev_idx": 0xFF,
+                "transport": "bluetooth",
+                "feat_idx_reprog": 0x10,
+            },
+        }
+        mutations = (
+            ("version", "not-an-int"),
+            ("saved_at", {"bad": "type"}),
+            ("candidate.pid", "not-an-int"),
+            ("candidate.usage_page", None),
+            ("device.dev_idx", "not-an-int"),
+            ("device.feat_idx_reprog", 999),
+            ("candidate.path", ["not", "a", "string"]),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = os.path.join(tmp, "last_device.json")
+            for field, value in mutations:
+                with self.subTest(field=field):
+                    payload = json.loads(json.dumps(valid))
+                    target = payload
+                    parts = field.split(".")
+                    for part in parts[:-1]:
+                        target = target[part]
+                    target[parts[-1]] = value
+                    with open(cache_path, "w", encoding="utf-8") as fh:
+                        json.dump(payload, fh)
+                    with patch.object(hid_gesture, "_cache_path", return_value=cache_path):
+                        self.assertIsNone(hid_gesture._load_last_device_cache())
+
+    def test_valid_cache_still_loads(self):
+        payload = {
+            "version": hid_gesture._CACHE_SCHEMA_VERSION,
+            "saved_at": time.time(),
+            "candidate": {
+                "pid": 0xB034,
+                "usage_page": 0xFF00,
+                "usage": 1,
+                "transport": "Bluetooth Low Energy",
+                "source": "hidapi-enumerate",
+                "path": "/dev/hidraw0",
+            },
+            "device": {
+                "name": "MX Master 3S",
+                "dev_idx": 0xFF,
+                "transport": "bluetooth",
+                "feat_idx_reprog": 0x10,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = os.path.join(tmp, "last_device.json")
+            with open(cache_path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh)
+            with patch.object(hid_gesture, "_cache_path", return_value=cache_path):
+                self.assertEqual(hid_gesture._load_last_device_cache(), payload)
 
 
 class HidModuleImportTests(unittest.TestCase):

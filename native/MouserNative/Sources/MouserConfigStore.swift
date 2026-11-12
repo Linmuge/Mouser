@@ -235,9 +235,32 @@ enum MouserConfigMutation: Equatable, Sendable {
     }
 }
 
-enum MouserConfigError: Error, Equatable {
+enum MouserConfigError: LocalizedError, Equatable {
     case expectedObject(path: [String])
     case invalidRoot
+    case corruptBackupFailed(fileName: String, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .expectedObject(path):
+            "配置字段不是对象：\(path.joined(separator: "."))"
+        case .invalidRoot:
+            "配置根节点必须是对象"
+        case let .corruptBackupFailed(fileName, message):
+            "损坏配置无法备份（\(fileName)）：\(message)"
+        }
+    }
+}
+
+enum MouserConfigurationLoadDisposition: Equatable, Sendable {
+    case existing
+    case created
+    case recovered(backupFileName: String)
+}
+
+struct MouserConfigurationLoadResult: Equatable, Sendable {
+    let snapshot: MouserConfigurationSnapshot
+    let disposition: MouserConfigurationLoadDisposition
 }
 
 struct MouserConfigurationSnapshot: Equatable, Sendable {
@@ -280,6 +303,24 @@ struct MouserConfigurationSnapshot: Equatable, Sendable {
 
     init(root: JSONValue) throws {
         guard root.objectValue != nil else { throw MouserConfigError.invalidRoot }
+        if let settings = root.value(at: ["settings"]), settings.objectValue == nil {
+            throw MouserConfigError.expectedObject(path: ["settings"])
+        }
+        if let profiles = root.value(at: ["profiles"]) {
+            guard let profilesObject = profiles.objectValue else {
+                throw MouserConfigError.expectedObject(path: ["profiles"])
+            }
+            for (profileID, profile) in profilesObject {
+                guard let profileObject = profile.objectValue else {
+                    throw MouserConfigError.expectedObject(path: ["profiles", profileID])
+                }
+                if let mappings = profileObject["mappings"], mappings.objectValue == nil {
+                    throw MouserConfigError.expectedObject(
+                        path: ["profiles", profileID, "mappings"]
+                    )
+                }
+            }
+        }
         version = root.value(at: ["version"])?.integerValue ?? 11
         activeProfileID = root.value(at: ["active_profile"])?.stringValue ?? "default"
         dpi = root.value(at: ["settings", "dpi"])?.integerValue ?? 1000
@@ -316,13 +357,15 @@ struct MouserConfigurationSnapshot: Equatable, Sendable {
         debugMode = root.value(at: ["settings", "debug_mode"])?.boolValue ?? false
         deviceLayoutOverrides = root.value(at: ["settings", "device_layout_overrides"])?.objectValue?
             .compactMapValues(\.stringValue) ?? [:]
-        startMinimized = root.value(at: ["settings", "start_minimized"])?.boolValue ?? true
+        // A missing key is not an explicit request to hide the settings window.
+        // Existing cross-platform configurations that opted in still contain `true`.
+        startMinimized = root.value(at: ["settings", "start_minimized"])?.boolValue ?? false
         startAtLogin = root.value(at: ["settings", "start_at_login"])?.boolValue ?? false
         checkForUpdates = root.value(at: ["settings", "check_for_updates"])?.boolValue ?? true
         screenshotDirectory = root.value(
             at: ["settings", "screenshot_directory"]
         )?.stringValue ?? ""
-        gestureThreshold = root.value(at: ["settings", "gesture_threshold"])?.numberValue ?? 50
+        gestureThreshold = root.value(at: ["settings", "gesture_threshold"])?.numberValue ?? 25
         gestureCommitWindowMilliseconds = root.value(
             at: ["settings", "gesture_commit_window_ms"]
         )?.numberValue ?? 400
@@ -419,19 +462,71 @@ actor MouserConfigStore {
     }
 
     func load() throws -> MouserConfigurationSnapshot {
-        let root = try readRoot()
-        return try MouserConfigurationSnapshot(root: root)
+        try loadWithDisposition().snapshot
+    }
+
+    func loadWithDisposition() throws -> MouserConfigurationLoadResult {
+        let loadedRoot = try loadRoot()
+        return MouserConfigurationLoadResult(
+            snapshot: try MouserConfigurationSnapshot(root: loadedRoot.root),
+            disposition: loadedRoot.disposition
+        )
     }
 
     func update(_ mutation: MouserConfigMutation) throws {
-        var root = try readRoot()
+        var root = try loadRoot().root
         try mutation.apply(to: &root)
         try write(root)
     }
 
-    private func readRoot() throws -> JSONValue {
+    private func loadRoot() throws -> (
+        root: JSONValue,
+        disposition: MouserConfigurationLoadDisposition
+    ) {
+        guard FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false)) else {
+            let root = Self.defaultRoot
+            try write(root)
+            return (root, .created)
+        }
+
         let data = try Data(contentsOf: fileURL)
-        return try decoder.decode(JSONValue.self, from: data)
+        do {
+            let root = try decoder.decode(JSONValue.self, from: data)
+            _ = try MouserConfigurationSnapshot(root: root)
+            return (root, .existing)
+        } catch is DecodingError {
+            return try recoverCorruptConfiguration()
+        } catch is MouserConfigError {
+            return try recoverCorruptConfiguration()
+        }
+    }
+
+    private func recoverCorruptConfiguration() throws -> (
+        root: JSONValue,
+        disposition: MouserConfigurationLoadDisposition
+    ) {
+        let backupURL = fileURL.deletingLastPathComponent().appending(
+            path: "\(fileURL.lastPathComponent).corrupt-\(UUID().uuidString).backup",
+            directoryHint: .notDirectory
+        )
+        do {
+            try FileManager.default.copyItem(at: fileURL, to: backupURL)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: backupURL.path(percentEncoded: false)
+            )
+        } catch {
+            throw MouserConfigError.corruptBackupFailed(
+                fileName: backupURL.lastPathComponent,
+                message: error.localizedDescription
+            )
+        }
+
+        let root = Self.defaultRoot
+        // `write` atomically replaces the active file. If it fails, the original
+        // file remains in place and the secured backup is still available.
+        try write(root)
+        return (root, .recovered(backupFileName: backupURL.lastPathComponent))
     }
 
     private func write(_ root: JSONValue) throws {
@@ -441,7 +536,111 @@ actor MouserConfigStore {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directoryURL.path(percentEncoded: false)
+        )
         let data = try encoder.encode(root)
         try fileWriter.write(data, to: fileURL)
     }
+
+    private static let defaultRoot: JSONValue = .object([
+        "version": .integer(11),
+        "active_profile": .string("default"),
+        "profiles": .object([
+            "default": .object([
+                "label": .string("Default (All Apps)"),
+                "apps": .array([]),
+                "mappings": .object([
+                    "middle": .string("none"),
+                    "mode_shift": .string("switch_scroll_mode"),
+                    "xbutton1": .string("mouse_back_click"),
+                    "xbutton2": .string("mouse_forward_click"),
+                    "gesture": .string("app_expose"),
+                    "gesture_tap": .string("none"),
+                    "gesture_left": .string("none"),
+                    "gesture_right": .string("none"),
+                    "gesture_up": .string("none"),
+                    "gesture_down": .string("none"),
+                    "actions_ring": .string("activate_actions_ring"),
+                    "actions_ring_tap": .string("none"),
+                    "actions_ring_left": .string("none"),
+                    "actions_ring_right": .string("none"),
+                    "actions_ring_up": .string("none"),
+                    "actions_ring_down": .string("none"),
+                    "mode_shift_tap": .string("none"),
+                    "mode_shift_left": .string("none"),
+                    "mode_shift_right": .string("none"),
+                    "mode_shift_up": .string("none"),
+                    "mode_shift_down": .string("none"),
+                    "middle_tap": .string("none"),
+                    "middle_left": .string("none"),
+                    "middle_right": .string("none"),
+                    "middle_up": .string("none"),
+                    "middle_down": .string("none"),
+                    "xbutton1_tap": .string("none"),
+                    "xbutton1_left": .string("none"),
+                    "xbutton1_right": .string("none"),
+                    "xbutton1_up": .string("none"),
+                    "xbutton1_down": .string("none"),
+                    "xbutton2_tap": .string("none"),
+                    "xbutton2_left": .string("none"),
+                    "xbutton2_right": .string("none"),
+                    "xbutton2_up": .string("none"),
+                    "xbutton2_down": .string("none"),
+                    "hscroll_left": .string("none"),
+                    "hscroll_right": .string("none"),
+                    "thumb_button": .string("none"),
+                    "actions_ring_slots": .array([
+                        .string("mission_control"),
+                        .string("play_pause"),
+                        .string("show_desktop"),
+                        .string("launchpad"),
+                    ]),
+                ]),
+                "button_haptic": .object([:]),
+            ]),
+        ]),
+        "settings": .object([
+            "start_minimized": .bool(false),
+            "start_at_login": .bool(false),
+            "hscroll_threshold": .number(0.1),
+            "invert_hscroll": .bool(false),
+            "invert_vscroll": .bool(false),
+            "dpi": .integer(1_000),
+            "dpi_presets": .array([800, 1_200, 1_600, 2_400].map(JSONValue.integer)),
+            "smart_shift_mode": .string("ratchet"),
+            "smart_shift_enabled": .bool(false),
+            "smart_shift_threshold": .integer(25),
+            "scroll_force": .integer(50),
+            "gesture_threshold": .number(25),
+            "gesture_commit_window_ms": .number(400),
+            "gesture_settle_ms": .number(90),
+            "gesture_cross_ratio": .number(0.5),
+            "appearance_mode": .string("system"),
+            "language": .string("en"),
+            "debug_mode": .bool(false),
+            "device_layout_overrides": .object([:]),
+            "haptic_level": .integer(2),
+            "haptic_enabled": .bool(true),
+            "action_haptic": .array([]),
+            "button_haptic": .array([]),
+            "haptic_dedup": .bool(true),
+            "ignore_trackpad": .bool(true),
+            "screenshot_directory": .string(""),
+            "wheel_divert": .string("auto"),
+            "check_for_updates": .bool(true),
+            "update_check_state": .object([:]),
+            "force_sensitivity": .null,
+            "actions_ring_hold_ms": .integer(250),
+            "actions_ring_hover_haptic": .bool(true),
+            "actions_ring_use_global": .bool(true),
+            "actions_ring_slots": .array([
+                .string("mission_control"),
+                .string("play_pause"),
+                .string("show_desktop"),
+                .string("launchpad"),
+            ]),
+        ]),
+    ])
 }

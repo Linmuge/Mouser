@@ -17,9 +17,9 @@ class GenerateUpdateManifestTests(unittest.TestCase):
                 asset_dir=str(asset_dir),
                 tag="v3.8.0",
                 repo="Linmuge/Mouser",
-                expires_days="30",
+                expires_days="0",
                 build_number="",
-                commit="abc123",
+                commit="a" * 40,
             )
 
             payload = build_payload(args)
@@ -29,6 +29,7 @@ class GenerateUpdateManifestTests(unittest.TestCase):
             self.assertEqual(arm["name"], "Mouser-3.8.0.dmg")
             self.assertEqual(intel, arm)
             self.assertNotIn("debug", arm["name"])
+            self.assertNotIn("expires_at", payload)
 
 
 if __name__ == "__main__":
